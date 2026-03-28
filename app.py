@@ -31,23 +31,21 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (MOTOR INTELIGENTE)
+# 3. CARGA DE DATOS (ESTRICTA)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- CONVERSIÓN DE FECHA MULTI-FORMATO ---
-    # Paso 1: Intentar convertir con día primero (Formato Latino)
-    df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], dayfirst=True, errors='coerce')
+    # --- PROCESAMIENTO ESTRICTO ---
+    # 1. Limpiamos espacios y tomamos solo los 10 primeros caracteres (DD/MM/YYYY)
+    fechas_raw = df["Marca temporal"].astype(str).str.strip().str[:10]
     
-    # Paso 2: Si quedaron errores (NaT), intentar conversión automática (Formato ISO/Americano)
-    mask_nat = df['Fecha_DT'].isna()
-    if mask_nat.any():
-        df.loc[mask_nat, 'Fecha_DT'] = pd.to_datetime(df.loc[mask_nat, "Marca temporal"], errors='coerce')
+    # 2. Forzamos el formato Día/Mes/Año. Si no cumple, dará NaT
+    df['Fecha_DT'] = pd.to_datetime(fechas_raw, format='%d/%m/%Y', errors='coerce')
     
-    # Paso 3: Extraer solo la fecha pura
+    # 3. Extraer fecha limpia para comparaciones
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
     # Limpieza de números
@@ -94,9 +92,7 @@ try:
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
-    # Filtro pro de nombres
-    tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])]
-    tech_counts = tech_counts.head(12)
+    tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])].head(12)
 
     fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
                       text_auto=True, color='Servicios', color_continuous_scale='Blues')
@@ -116,7 +112,11 @@ try:
                          7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
         
-        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
+        # Agrupar y filtrar para no mostrar fechas futuras absurdas (posteriores a hoy)
+        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total')
+        # Filtro de seguridad: Solo meses que ya pasaron o el actual
+        hist = hist[hist['Año'] <= hoy_vzla.year]
+        hist = hist.sort_values(['Año', 'Mes_Num'], ascending=False)
         
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
@@ -126,8 +126,8 @@ try:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
         
-        # Gráfico de tendencia
-        consumo = df_hist.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
+        # Gráfico de tendencia (Últimos 30 días con datos reales)
+        consumo = df.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
         fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Material (Últimos 30 días)")
         fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
         st.plotly_chart(fig_cons, use_container_width=True)
