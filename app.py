@@ -7,7 +7,7 @@ import pytz
 from streamlit_autorefresh import st_autorefresh 
 
 # 1. CONFIGURACIÓN
-st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
+st.set_page_config(page_title="FIBRA RAQ | Inteligencia Operativa", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
 # --- ZONA HORARIA VENEZUELA ---
@@ -31,21 +31,33 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (ESTRICTA)
+# 3. MOTOR DE CARGA HÍBRIDO (Resuelve el problema de los registros perdidos)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(worksheet="Base de Datos ", ttl=0) 
-    df = df.dropna(subset=["Marca temporal"], how='all')
+    df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
+    df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
     
-    # --- PROCESAMIENTO ESTRICTO ---
-    # 1. Limpiamos espacios y tomamos solo los 10 primeros caracteres (DD/MM/YYYY)
-    fechas_raw = df["Marca temporal"].astype(str).str.strip().str[:10]
-    
-    # 2. Forzamos el formato Día/Mes/Año. Si no cumple, dará NaT
-    df['Fecha_DT'] = pd.to_datetime(fechas_raw, format='%d/%m/%Y', errors='coerce')
-    
-    # 3. Extraer fecha limpia para comparaciones
+    def parse_dates(series):
+        # Intento 1: Formato Día-Primero (Latino)
+        dates = pd.to_datetime(series, dayfirst=True, errors='coerce')
+        
+        # Intento 2: Para los que fallaron, intentar como números serie de Excel (seriales)
+        mask = dates.isna()
+        if mask.any():
+            # Intentamos convertir a número y luego a fecha desde el origen de Excel (1899-12-30)
+            seriales = pd.to_numeric(series[mask], errors='coerce')
+            dates[mask] = pd.to_datetime(seriales, unit='D', origin='1899-12-30').dt.round('1s')
+        
+        # Intento 3: Conversión genérica para cualquier resto
+        mask = dates.isna()
+        if mask.any():
+            dates[mask] = pd.to_datetime(series[mask], errors='coerce')
+            
+        return dates
+
+    # Aplicamos el motor híbrido
+    df['Fecha_DT'] = parse_dates(df["Marca temporal"])
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
     # Limpieza de números
@@ -57,7 +69,7 @@ def load_data():
 try:
     df = load_data()
     
-    # Lógica de semanas (Jueves a Miércoles)
+    # Cálculos de Semanas
     def get_jueves(d):
         return d - timedelta(days=(d.isoweekday() - 4) % 7)
 
@@ -68,66 +80,64 @@ try:
 
     # --- HEADER ---
     st.markdown("<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Corte de datos (Vzla): {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Vzla: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: KPI ---
+    # --- KPIs ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     
     with k1:
-        val_hoy = len(df[df['Fecha_Limpia'] == hoy_vzla])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val_hoy}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+        val = len(df[df['Fecha_Limpia'] == hoy_vzla])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k2:
-        val_ayer = len(df[df['Fecha_Limpia'] == ayer_vzla])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{val_ayer}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+        val = len(df[df['Fecha_Limpia'] == ayer_vzla])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{val}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k3:
-        val_sem = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4:
-        val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: PRODUCTIVIDAD ---
+    # --- PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])].head(12)
 
-    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
-                      text_auto=True, color='Servicios', color_continuous_scale='Blues')
+    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues')
     fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
-    # --- SECCIÓN 3: HISTORIAL ---
+    # --- ANÁLISIS HISTÓRICO (CORREGIDO) ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
-        # Usamos Fecha_DT para el historial mensual
+        # Aseguramos que trabajamos con registros que tienen fecha válida
         df_hist = df.dropna(subset=['Fecha_DT']).copy()
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
         df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
         
-        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 
-                         7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
         
-        # Agrupar y filtrar para no mostrar fechas futuras absurdas (posteriores a hoy)
-        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total')
-        # Filtro de seguridad: Solo meses que ya pasaron o el actual
-        hist = hist[hist['Año'] <= hoy_vzla.year]
-        hist = hist.sort_values(['Año', 'Mes_Num'], ascending=False)
+        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
         
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
             st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
-    
+        
+        # Alerta de calidad (Si hay registros que no se pudieron convertir)
+        fallidos = len(df) - len(df_hist)
+        if fallidos > 0:
+            st.warning(f"⚠️ {fallidos} registros tienen fechas ilegibles en el Excel y no se muestran aquí.")
+
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
         
-        # Gráfico de tendencia (Últimos 30 días con datos reales)
-        consumo = df.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
+        consumo = df_hist.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
         fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Material (Últimos 30 días)")
         fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
         st.plotly_chart(fig_cons, use_container_width=True)
