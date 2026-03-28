@@ -3,7 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
-import pytz # <-- Nueva librería para zona horaria
+import pytz 
 from streamlit_autorefresh import st_autorefresh 
 
 # 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO (Cada 60 seg)
@@ -14,8 +14,9 @@ st_autorefresh(interval=60000, key="datarefresh")
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
+ayer_vzla = hoy_vzla - timedelta(days=1)
 
-# 2. ESTILO CSS DARK PREMIUM (Corregido para visibilidad)
+# 2. ESTILO CSS DARK PREMIUM
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -30,19 +31,15 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA Y PROCESAMIENTO
-@st.cache_data(ttl=5) # Cache de Streamlit corto
+# 3. FUNCIÓN CARGA DE DATOS
+@st.cache_data(ttl=5)
 def load_data():
-    # Usamos ttl=0 dentro del read para obligar a Google a enviar los datos más frescos
     conn = st.connection("gsheets", type=GSheetsConnection)
+    # ttl=0 para forzar a Google Sheets a dar el dato más reciente
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
-    
-    # Eliminamos filas que estén totalmente vacías
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- PROCESAMIENTO INTELIGENTE DE FECHA ---
-    # En lugar de "picar" el texto, dejamos que Pandas detecte el formato automáticamente
-    # Esto leerá correctamente tanto "28/03/2026" como "28/03/2026 11:07:22"
+    # Procesamiento robusto de fecha para capturar casos sin hora (como tu fila 895)
     df['Fecha_Limpia'] = pd.to_datetime(df["Marca temporal"], dayfirst=True, errors='coerce').dt.date
     
     # Limpieza de números
@@ -50,7 +47,12 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     
     return df
+
+# 4. EJECUCIÓN DEL DASHBOARD
+try:
+    df = load_data()
     
+    # Funciones de apoyo para semanas (Jueves a Miércoles)
     def get_jueves(d):
         return d - timedelta(days=(d.isoweekday() - 4) % 7)
 
@@ -68,29 +70,29 @@ def load_data():
     k1, k2, k3, k4 = st.columns(4)
     
     with k1:
-        # Aquí comparamos con hoy_vzla
-        val = len(df[df['Fecha_Limpia'] == hoy_vzla])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+        val_hoy = len(df[df['Fecha_Limpia'] == hoy_vzla])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val_hoy}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k2:
-        val = len(df[df['Fecha_Limpia'] == ayer_vzla])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{val}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+        val_ayer = len(df[df['Fecha_Limpia'] == ayer_vzla])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{val_ayer}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k3:
-        val = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val_sem = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4:
-        val = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN 2: PRODUCTIVIDAD TÉCNICOS ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
-    tech_counts = tech_counts[(tech_counts['Técnico'] != "") & (tech_counts['Técnico'] != "None")].head(12)
+    # Filtrar vacíos y mostrar Top 12
+    tech_counts = tech_counts[(tech_counts['Técnico'] != "") & (tech_counts['Técnico'] != "None") & (tech_counts['Técnico'] != "nan")].head(12)
 
     fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
                       text_auto=True, color='Servicios', color_continuous_scale='Blues')
-    fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0))
+    fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
     # --- SECCIÓN 3: HISTORIAL ---
@@ -108,10 +110,11 @@ def load_data():
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
+        # Tendencia últimos 20 días
         consumo = df.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(20)
         fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Cable (Mts)")
         fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
         st.plotly_chart(fig_cons, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error detectado: {e}")
