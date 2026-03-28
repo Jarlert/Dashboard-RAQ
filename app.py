@@ -31,16 +31,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Recuperando la lógica de éxito)
+# 3. CARGA DE DATOS (Código original proporcionado por el usuario)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- LA CLAVE PARA LOS 237 DE FEBRERO ---
-    # Forzamos que lea siempre Día/Mes/Año sin intentar adivinar. 
-    # Usamos exact=False para que ignore la hora si existe.
+    # --- LA CLAVE PARA LOS 237 DE FEBRERO (Sin tocar) ---
     df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], format='%d/%m/%Y', exact=False, errors='coerce')
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
@@ -66,7 +64,7 @@ try:
     st.markdown("<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Venezuela: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: KPIs ---
+    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     
@@ -83,6 +81,19 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
+    # --- SECCIÓN NUEVA: EFICIENCIA (Promedios solicitados) ---
+    st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
+    e1, e2, e3, e4 = st.columns(4)
+
+    total_inst = len(df) if len(df) > 0 else 1
+    media_metros = df['Metraje'].sum() / total_inst
+    media_tensores = df['Tensores'].sum() / total_inst
+
+    with e1:
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{media_metros:.2f}</div><div class='m-sub'>Mts por instalación</div></div>", unsafe_allow_html=True)
+    with e2:
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Tensores</div><div class='m-value'>{media_tensores:.2f}</div><div class='m-sub'>Und por instalación</div></div>", unsafe_allow_html=True)
+
     # --- SECCIÓN 2: PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
@@ -95,11 +106,10 @@ try:
     fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
-    # --- SECCIÓN 3: HISTORIAL (CORREGIDO) ---
+    # --- SECCIÓN 3: HISTORIAL ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
-        # Filtramos para quitar meses futuros (como el error de Diciembre 2026)
         df_hist = df.dropna(subset=['Fecha_DT']).copy()
         df_hist = df_hist[df_hist['Fecha_DT'].dt.date <= hoy_vzla]
         
@@ -119,10 +129,7 @@ try:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
         
-        consumo = df_hist.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
-        fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Material (Últimos 30 días)")
-        fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-        st.plotly_chart(fig_cons, use_container_width=True)
+        # El gráfico de Gasto de Material ha sido eliminado según la solicitud.
 
 except Exception as e:
     st.error(f"Error detectado: {e}")
