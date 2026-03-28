@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytz 
 from streamlit_autorefresh import st_autorefresh 
 
-# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO (Cada 60 seg)
+# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
@@ -31,16 +31,19 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. FUNCIÓN CARGA DE DATOS
+# 3. CARGA DE DATOS
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # ttl=0 para forzar a Google Sheets a dar el dato más reciente
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # Procesamiento robusto de fecha para capturar casos sin hora (como tu fila 895)
-    df['Fecha_Limpia'] = pd.to_datetime(df["Marca temporal"], dayfirst=True, errors='coerce').dt.date
+    # --- LIMPIEZA DEFINITIVA DE FECHA ---
+    # Tomamos los primeros 10 caracteres (ej: '28/03/2026') para ignorar la hora y cualquier error
+    fechas_raw = df["Marca temporal"].astype(str).str.strip().str[:10]
+    
+    # Convertimos con formato explícito Día/Mes/Año
+    df['Fecha_Limpia'] = pd.to_datetime(fechas_raw, format='%d/%m/%Y', errors='coerce').dt.date
     
     # Limpieza de números
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
@@ -48,11 +51,10 @@ def load_data():
     
     return df
 
-# 4. EJECUCIÓN DEL DASHBOARD
 try:
     df = load_data()
     
-    # Funciones de apoyo para semanas (Jueves a Miércoles)
+    # Lógica de semanas (Jueves a Miércoles)
     def get_jueves(d):
         return d - timedelta(days=(d.isoweekday() - 4) % 7)
 
@@ -82,12 +84,11 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: PRODUCTIVIDAD TÉCNICOS ---
+    # --- SECCIÓN 2: PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
-    # Filtrar vacíos y mostrar Top 12
     tech_counts = tech_counts[(tech_counts['Técnico'] != "") & (tech_counts['Técnico'] != "None") & (tech_counts['Técnico'] != "nan")].head(12)
 
     fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
@@ -99,20 +100,28 @@ try:
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
-        df['Mes_Num'] = pd.to_datetime(df['Fecha_Limpia']).dt.month
-        df['Año'] = pd.to_datetime(df['Fecha_Limpia']).dt.year.fillna(0).astype(int)
-        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-        df['Mes_Nombre'] = df['Mes_Num'].map(meses_nombres)
-        hist = df.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
+        # Convertir a datetime para extraer mes/año sin errores
+        df_hist = df.dropna(subset=['Fecha_Limpia']).copy()
+        df_hist['Fecha_DT'] = pd.to_datetime(df_hist['Fecha_Limpia'])
+        df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
+        df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
+        
+        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 
+                         7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+        df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
+        
+        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
+        
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
             st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
+    
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
-        # Tendencia últimos 20 días
+        
         consumo = df.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(20)
-        fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Cable (Mts)")
+        fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Tendencia de Instalaciones (Mts de Cable)")
         fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
         st.plotly_chart(fig_cons, use_container_width=True)
 
