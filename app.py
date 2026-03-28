@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 import pytz 
 from streamlit_autorefresh import st_autorefresh 
 
-# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
-# --- CONFIGURACIÓN DE HORA VENEZUELA ---
+# --- ZONA HORARIA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
@@ -31,19 +31,24 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS
+# 3. CARGA DE DATOS (MOTOR INTELIGENTE)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- LIMPIEZA DEFINITIVA DE FECHA ---
-    # Tomamos los primeros 10 caracteres (ej: '28/03/2026') para ignorar la hora y cualquier error
-    fechas_raw = df["Marca temporal"].astype(str).str.strip().str[:10]
+    # --- CONVERSIÓN DE FECHA MULTI-FORMATO ---
+    # Paso 1: Intentar convertir con día primero (Formato Latino)
+    df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], dayfirst=True, errors='coerce')
     
-    # Convertimos con formato explícito Día/Mes/Año
-    df['Fecha_Limpia'] = pd.to_datetime(fechas_raw, format='%d/%m/%Y', errors='coerce').dt.date
+    # Paso 2: Si quedaron errores (NaT), intentar conversión automática (Formato ISO/Americano)
+    mask_nat = df['Fecha_DT'].isna()
+    if mask_nat.any():
+        df.loc[mask_nat, 'Fecha_DT'] = pd.to_datetime(df.loc[mask_nat, "Marca temporal"], errors='coerce')
+    
+    # Paso 3: Extraer solo la fecha pura
+    df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
     # Limpieza de números
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
@@ -65,9 +70,9 @@ try:
 
     # --- HEADER ---
     st.markdown("<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Corte de datos (Hora Vzla): {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Corte de datos (Vzla): {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: KPI TIEMPO REAL ---
+    # --- SECCIÓN 1: KPI ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     
@@ -89,7 +94,9 @@ try:
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
-    tech_counts = tech_counts[(tech_counts['Técnico'] != "") & (tech_counts['Técnico'] != "None") & (tech_counts['Técnico'] != "nan")].head(12)
+    # Filtro pro de nombres
+    tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])]
+    tech_counts = tech_counts.head(12)
 
     fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
                       text_auto=True, color='Servicios', color_continuous_scale='Blues')
@@ -100,9 +107,8 @@ try:
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
-        # Convertir a datetime para extraer mes/año sin errores
-        df_hist = df.dropna(subset=['Fecha_Limpia']).copy()
-        df_hist['Fecha_DT'] = pd.to_datetime(df_hist['Fecha_Limpia'])
+        # Usamos Fecha_DT para el historial mensual
+        df_hist = df.dropna(subset=['Fecha_DT']).copy()
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
         df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
         
@@ -120,8 +126,9 @@ try:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
         
-        consumo = df.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(20)
-        fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Tendencia de Instalaciones (Mts de Cable)")
+        # Gráfico de tendencia
+        consumo = df_hist.groupby('Fecha_Limpia')['Metraje'].sum().reset_index().tail(30)
+        fig_cons = px.area(consumo, x='Fecha_Limpia', y='Metraje', title="Gasto de Material (Últimos 30 días)")
         fig_cons.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
         st.plotly_chart(fig_cons, use_container_width=True)
 
