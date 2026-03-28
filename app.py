@@ -31,7 +31,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # 3. CARGA Y PROCESAMIENTO
-@st.cache_data(ttl=5) # Reducimos TTL a 5 segundos para refresco más agresivo
 @st.cache_data(ttl=5) # Cache de Streamlit corto
 def load_data():
     # Usamos ttl=0 dentro del read para obligar a Google a enviar los datos más frescos
