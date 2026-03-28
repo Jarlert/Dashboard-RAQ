@@ -32,26 +32,25 @@ st.markdown("""
 
 # 3. CARGA Y PROCESAMIENTO
 @st.cache_data(ttl=5) # Reducimos TTL a 5 segundos para refresco más agresivo
+@st.cache_data(ttl=5) # Cache de Streamlit corto
 def load_data():
+    # Usamos ttl=0 dentro del read para obligar a Google a enviar los datos más frescos
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(worksheet="Base de Datos ")
+    df = conn.read(worksheet="Base de Datos ", ttl=0) 
+    
+    # Eliminamos filas que estén totalmente vacías
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # Fecha: Extraemos solo la fecha e ignoramos la hora del Excel para comparar
-    fechas_raw = df["Marca temporal"].astype(str).str.strip().str.split(' ').str[0]
-    df['Fecha_Limpia'] = pd.to_datetime(fechas_raw, format='%d/%m/%Y', errors='coerce').dt.date
+    # --- PROCESAMIENTO INTELIGENTE DE FECHA ---
+    # En lugar de "picar" el texto, dejamos que Pandas detecte el formato automáticamente
+    # Esto leerá correctamente tanto "28/03/2026" como "28/03/2026 11:07:22"
+    df['Fecha_Limpia'] = pd.to_datetime(df["Marca temporal"], dayfirst=True, errors='coerce').dt.date
     
-    # Materiales
+    # Limpieza de números
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     
     return df
-
-try:
-    df = load_data()
-    
-    # Lógica de Fechas en VZLA
-    ayer_vzla = hoy_vzla - timedelta(days=1)
     
     def get_jueves(d):
         return d - timedelta(days=(d.isoweekday() - 4) % 7)
