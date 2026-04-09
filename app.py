@@ -5,6 +5,9 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import pytz 
 from streamlit_autorefresh import st_autorefresh 
+# Nuevas librerías para detectar colores
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
 
 # 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO (Cada 60 seg)
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
@@ -31,7 +34,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Código original proporcionado por el usuario)
+# 3. CARGA DE DATOS (Tu código original sin cambios)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -48,8 +51,56 @@ def load_data():
     
     return df
 
+# 4. FUNCIÓN PARA CONTAR COLORES (Basado en Columna B del otro libro)
+@st.cache_data(ttl=30)
+def load_asignados_counts():
+    try:
+        # Usamos las credenciales de Service Account que ya tienes en secrets
+        creds_info = st.secrets["connections"]["gsheets"]
+        creds = service_account.Credentials.from_service_account_info(creds_info)
+        service = build('sheets', 'v4', credentials=creds)
+        
+        spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
+        range_name = "ASIGNADOS!A:L"
+        
+        # Obtenemos los datos con metadatos de formato (colores)
+        result = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, 
+            ranges=[range_name], 
+            includeGridData=True
+        ).execute()
+        
+        rows = result['sheets'][0]['data'][0].get('rowData', [])
+        blancos = 0
+        grises = 0
+        
+        for row in rows:
+            cells = row.get('values', [])
+            # Verificamos si la Columna B (indice 1) tiene texto (Plan)
+            if len(cells) > 1 and cells[1].get('formattedValue'):
+                # Obtenemos el color de fondo
+                format_info = cells[1].get('effectiveFormat', {})
+                bg = format_info.get('backgroundColor', {})
+                
+                r = bg.get('red', 1.0)
+                g = bg.get('green', 1.0)
+                b = bg.get('blue', 1.0)
+                
+                # Detectar Blanco (Valores cercanos a 1)
+                if r > 0.95 and g > 0.95 and b > 0.95:
+                    blancos += 1
+                # Detectar Gris (R, G y B son iguales pero menores a 1)
+                elif r < 0.9 and abs(r - g) < 0.05 and abs(g - b) < 0.05:
+                    grises += 1
+        
+        return blancos, grises
+    except:
+        return 0, 0
+
 try:
     df = load_data()
+    # Cargamos los nuevos datos de la hoja ASIGNADOS
+    pend_realizar, pend_adecuacion = load_asignados_counts()
     
     # Lógica de Semanas (Jueves a Miércoles)
     def get_jueves(d):
@@ -81,7 +132,15 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN NUEVA: EFICIENCIA (Promedios solicitados) ---
+    # --- SECCIÓN NUEVA: ESTADO DE ASIGNACIONES (Cuadros solicitados) ---
+    st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
+    a1, a2, a3, a4 = st.columns(4)
+    with a1:
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Filas Blancas</div></div>", unsafe_allow_html=True)
+    with a2:
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Filas Grises</div></div>", unsafe_allow_html=True)
+
+    # --- SECCIÓN EFICIENCIA (Promedios) ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2, e3, e4 = st.columns(4)
 
@@ -128,8 +187,6 @@ try:
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
-        
-        # El gráfico de Gasto de Material ha sido eliminado según la solicitud.
 
 except Exception as e:
     st.error(f"Error detectado: {e}")
