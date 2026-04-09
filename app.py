@@ -33,14 +33,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Código original proporcionado por el usuario - NO TOCADO)
+# 3. CARGA DE DATOS (Tu lógica de éxito intacta)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- LA CLAVE PARA LOS 237 DE FEBRERO ---
+    # --- LA CLAVE PARA LOS 237 DE FEBRERO (No tocado) ---
     df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], format='%d/%m/%Y', exact=False, errors='coerce')
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
@@ -50,7 +50,7 @@ def load_data():
     
     return df
 
-# 4. FUNCIÓN PARA CONTAR COLORES (Corregida con filtro estricto de texto)
+# 4. FUNCIÓN PARA CONTAR COLORES (Filtro de texto ULTRA ESTRICTO)
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
@@ -59,7 +59,7 @@ def load_asignados_counts():
         service = build('sheets', 'v4', credentials=creds)
         
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        range_name = "ASIGNADOS!A:L"
+        range_name = "ASIGNADOS!B:B" # Solo pedimos la columna B para ser eficientes
         
         result = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id, 
@@ -73,37 +73,36 @@ def load_asignados_counts():
         
         for row in rows:
             cells = row.get('values', [])
-            # Verificamos si la Columna B (indice 1) tiene texto (Plan)
-            if len(cells) > 1:
-                # OBTENEMOS EL TEXTO REAL DE LA CELDA
-                plan_text = cells[1].get('formattedValue', '').strip()
-                
-                # REGLA CRÍTICA: Si no hay texto escrito, ignoramos la fila por completo
-                if not plan_text or len(plan_text) < 1:
-                    continue
-                
-                # Si hay texto, procedemos a ver el color
-                format_info = cells[1].get('effectiveFormat', {})
-                bg = format_info.get('backgroundColor', {})
-                
+            if not cells: continue
+            
+            cell_b = cells[0] # Al pedir solo B:B, el indice 0 es el Plan
+            
+            # VALIDACIÓN CLAVE: Verificamos si la celda tiene un valor real (User Entered)
+            # formattedValue es lo que se ve en pantalla. Si no hay nada, ignoramos.
+            text_in_cell = cell_b.get('formattedValue', '').strip()
+            
+            if len(text_in_cell) > 0:
+                # Obtenemos el color de fondo efectivo
+                bg = cell_b.get('effectiveFormat', {}).get('backgroundColor', {})
                 r = bg.get('red', 1.0)
                 g = bg.get('green', 1.0)
                 b = bg.get('blue', 1.0)
                 
-                # Detectar Gris: Si R, G y B son iguales y menores a 0.95
+                # Gris: R, G y B son iguales y menores a 1 (ej: 0.8)
+                # Usamos un margen de error pequeño por si acaso
                 if r < 0.95 and abs(r - g) < 0.02 and abs(g - b) < 0.02:
                     grises += 1
-                # En cualquier otro caso, si tiene texto y no es gris, es blanca (pendiente realizar)
                 else:
+                    # Si tiene texto y NO es gris, se asume blanca (o sin color)
                     blancos += 1
         
         return blancos, grises
-    except:
+    except Exception as e:
         return 0, 0
 
 try:
     df = load_data()
-    # Cargamos los nuevos datos filtrados de la hoja ASIGNADOS
+    # Cargamos los nuevos datos filtrados
     pend_realizar, pend_adecuacion = load_asignados_counts()
     
     # Lógica de Semanas (Jueves a Miércoles)
@@ -122,6 +121,7 @@ try:
     # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
+    
     with k1:
         val_hoy = len(df[df['Fecha_Limpia'] == hoy_vzla])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val_hoy}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
@@ -139,16 +139,18 @@ try:
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Filas Blancas con Texto</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Filas Blancas con Contenido</div></div>", unsafe_allow_html=True)
     with a2:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Filas Grises con Texto</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Filas Grises con Contenido</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN EFICIENCIA (Promedios) ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2, e3, e4 = st.columns(4)
+
     total_inst = len(df) if len(df) > 0 else 1
     media_metros = df['Metraje'].sum() / total_inst
     media_tensores = df['Tensores'].sum() / total_inst
+
     with e1:
         st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{media_metros:.2f}</div><div class='m-sub'>Mts por instalación</div></div>", unsafe_allow_html=True)
     with e2:
@@ -160,7 +162,9 @@ try:
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])].head(12)
-    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues')
+
+    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
+                      text_auto=True, color='Servicios', color_continuous_scale='Blues')
     fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
@@ -170,14 +174,19 @@ try:
     with c1:
         df_hist = df.dropna(subset=['Fecha_DT']).copy()
         df_hist = df_hist[df_hist['Fecha_DT'].dt.date <= hoy_vzla]
+        
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
         df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
+        
         meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
+        
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
+        
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
             st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
+    
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
