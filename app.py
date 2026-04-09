@@ -8,11 +8,11 @@ from streamlit_autorefresh import st_autorefresh
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO
+# 1. CONFIGURACIÓN Y AUTO-REFRESCO
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
-# --- CONFIGURACIÓN HORA VENEZUELA ---
+# --- ZONA HORARIA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
@@ -45,7 +45,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. FUNCIÓN PARA CONTAR POR COLOR ESPECÍFICO (#45818e)
+# 4. FUNCIÓN PARA CONTAR POR COLORES EXACTOS SOLICITADOS
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
@@ -54,7 +54,7 @@ def load_asignados_counts():
         service = build('sheets', 'v4', credentials=creds)
         
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        range_name = "ASIGNADOS!B:B" # Columna del Plan
+        range_name = "ASIGNADOS!B:B" # Columna B (Plan)
         
         result = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id, 
@@ -63,36 +63,30 @@ def load_asignados_counts():
         ).execute()
         
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        pendientes_realizar = 0 # Blancas con texto
-        adecuacion_caja = 0    # Color #45818e con texto
+        pendientes_realizar = 0 # Color #45818e
+        adecuacion_caja = 0    # Color #d9d9d9
         
-        # Valores RGB para el color #45818e (R:69, G:129, B:142)
-        target_r, target_g, target_b = 0.270, 0.505, 0.556
+        # Conversión de HEX a RGB normalizado (0 a 1) para Google API
+        # #45818e -> R:0.271, G:0.506, B:0.557
+        # #d9d9d9 -> R:0.851, G:0.851, B:0.851
         
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
+            cell = cells[0]
             
-            cell_b = cells[0]
-            # Solo procesamos si la celda tiene texto visible (Formatted Value)
-            texto = cell_b.get('formattedValue', '').strip()
-            
+            # Solo si tiene texto real
+            texto = cell.get('formattedValue', '').strip()
             if len(texto) > 0:
-                bg = cell_b.get('effectiveFormat', {}).get('backgroundColor', {})
-                r = bg.get('red', 1.0)
-                g = bg.get('green', 1.0)
-                b = bg.get('blue', 1.0)
+                bg = cell.get('effectiveFormat', {}).get('backgroundColor', {})
+                r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
                 
-                # Comprobamos si es el color específico solicitado (#45818e)
-                # Usamos una tolerancia mínima (0.02)
-                is_target_color = (abs(r - target_r) < 0.02 and 
-                                   abs(g - target_g) < 0.02 and 
-                                   abs(b - target_b) < 0.02)
-                
-                if is_target_color:
+                # VERIFICACIÓN COLOR #d9d9d9 (Gris - Adecuación)
+                if abs(r - 0.851) < 0.02 and abs(g - 0.851) < 0.02 and abs(b - 0.851) < 0.02:
                     adecuacion_caja += 1
-                elif r > 0.98 and g > 0.98 and b > 0.98:
-                    # Es blanca y tiene texto
+                
+                # VERIFICACIÓN COLOR #45818e (Azul/Verde - Pendientes realizar)
+                elif abs(r - 0.271) < 0.02 and abs(g - 0.506) < 0.02 and abs(b - 0.557) < 0.02:
                     pendientes_realizar += 1
         
         return pendientes_realizar, adecuacion_caja
@@ -111,28 +105,24 @@ try:
     fin_sem_pasada = inicio_sem_actual - timedelta(days=1)
 
     # --- HEADER ---
-    st.markdown("<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Venezuela: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Corte: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- RENDIMIENTO OPERATIVO ---
+    # --- SECCIÓN 1: RENDIMIENTO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k2: st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == ayer_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
-    with k3:
-        val_sem = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
-    with k4:
-        val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+    with k3: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+    with k4: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- ESTADO DE ASIGNACIONES ---
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES (Con colores exactos) ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Blancas con texto</div></div>", unsafe_allow_html=True)
-    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Color #45818e</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Color #45818e</div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Color #d9d9d9</div></div>", unsafe_allow_html=True)
 
-    # --- EFICIENCIA ---
+    # --- SECCIÓN EFICIENCIA ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2, e3, e4 = st.columns(4)
     total_inst = len(df) if len(df) > 0 else 1
@@ -145,9 +135,7 @@ try:
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])].head(12)
-    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues')
-    fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
-    st.plotly_chart(fig_tech, use_container_width=True)
+    st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
     # --- HISTORIAL ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
@@ -162,8 +150,7 @@ try:
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows(): st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{len(df):,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
+    with c2: st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global</div><div style='font-size: 72px; font-weight: 800;'>{len(df):,}</div><div style='font-size: 13px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error detectado: {e}")
