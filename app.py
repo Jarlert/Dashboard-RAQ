@@ -12,7 +12,7 @@ from google.oauth2 import service_account
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
-# --- ZONA HORARIA VENEZUELA ---
+# --- CONFIGURACIÓN HORA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS PRINCIPAL (Mantenida tu lógica de éxito de febrero)
+# 3. CARGA DE DATOS PRINCIPAL (Mantenida la lógica de éxito para los 237 de febrero)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -45,7 +45,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. FUNCIÓN PARA CONTAR POR COLORES EXACTOS SOLICITADOS
+# 4. FUNCIÓN PARA CONTAR COLORES EXACTOS (#efefef y #d9d9d9)
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
@@ -63,12 +63,12 @@ def load_asignados_counts():
         ).execute()
         
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        pendientes_realizar = 0 # Color #45818e
+        pendientes_realizar = 0 # Color #efefef
         adecuacion_caja = 0    # Color #d9d9d9
         
-        # Conversión de HEX a RGB normalizado (0 a 1) para Google API
-        # #45818e -> R:0.271, G:0.506, B:0.557
-        # #d9d9d9 -> R:0.851, G:0.851, B:0.851
+        # Conversión HEX a RGB (0 a 1)
+        # #efefef -> 0.937, 0.937, 0.937
+        # #d9d9d9 -> 0.851, 0.851, 0.851
         
         for row in rows:
             cells = row.get('values', [])
@@ -81,13 +81,13 @@ def load_asignados_counts():
                 bg = cell.get('effectiveFormat', {}).get('backgroundColor', {})
                 r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
                 
-                # VERIFICACIÓN COLOR #d9d9d9 (Gris - Adecuación)
-                if abs(r - 0.851) < 0.02 and abs(g - 0.851) < 0.02 and abs(b - 0.851) < 0.02:
-                    adecuacion_caja += 1
-                
-                # VERIFICACIÓN COLOR #45818e (Azul/Verde - Pendientes realizar)
-                elif abs(r - 0.271) < 0.02 and abs(g - 0.506) < 0.02 and abs(b - 0.557) < 0.02:
+                # VERIFICACIÓN COLOR #efefef (Gris muy claro - Pendientes Realizar)
+                if abs(r - 0.937) < 0.01 and abs(g - 0.937) < 0.01 and abs(b - 0.937) < 0.01:
                     pendientes_realizar += 1
+                
+                # VERIFICACIÓN COLOR #d9d9d9 (Gris - Adecuación o Caja)
+                elif abs(r - 0.851) < 0.01 and abs(g - 0.851) < 0.01 and abs(b - 0.851) < 0.01:
+                    adecuacion_caja += 1
         
         return pendientes_realizar, adecuacion_caja
     except:
@@ -113,13 +113,17 @@ try:
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k2: st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == ayer_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
-    with k3: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
-    with k4: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+    with k3:
+        val_sem = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+    with k4:
+        val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: ESTADO ASIGNACIONES (Con colores exactos) ---
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Color #45818e</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Color #efefef</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Color #d9d9d9</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN EFICIENCIA ---
