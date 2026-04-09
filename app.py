@@ -5,7 +5,6 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import pytz 
 from streamlit_autorefresh import st_autorefresh 
-# Nuevas librerías para detectar colores
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
@@ -34,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Tu código original sin cambios)
+# 3. CARGA DE DATOS (Mantenida la lógica de éxito de fechas)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -51,11 +50,10 @@ def load_data():
     
     return df
 
-# 4. FUNCIÓN PARA CONTAR COLORES (Basado en Columna B del otro libro)
+# 4. FUNCIÓN PARA CONTAR COLORES (Corregida para ignorar blancos sin texto)
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
-        # Usamos las credenciales de Service Account que ya tienes en secrets
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
@@ -63,7 +61,6 @@ def load_asignados_counts():
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         range_name = "ASIGNADOS!A:L"
         
-        # Obtenemos los datos con metadatos de formato (colores)
         result = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id, 
             ranges=[range_name], 
@@ -76,9 +73,15 @@ def load_asignados_counts():
         
         for row in rows:
             cells = row.get('values', [])
-            # Verificamos si la Columna B (indice 1) tiene texto (Plan)
-            if len(cells) > 1 and cells[1].get('formattedValue'):
-                # Obtenemos el color de fondo
+            # Validamos que la Columna B (indice 1) tenga texto real
+            if len(cells) > 1:
+                val_b = cells[1].get('formattedValue', "").strip()
+                
+                # SI NO HAY TEXTO EN LA COLUMNA B, IGNORAMOS LA FILA POR COMPLETO
+                if not val_b:
+                    continue
+
+                # Si llegamos aquí, es que hay texto. Ahora miramos el color.
                 format_info = cells[1].get('effectiveFormat', {})
                 bg = format_info.get('backgroundColor', {})
                 
@@ -86,11 +89,11 @@ def load_asignados_counts():
                 g = bg.get('green', 1.0)
                 b = bg.get('blue', 1.0)
                 
-                # Detectar Blanco (Valores cercanos a 1)
-                if r > 0.95 and g > 0.95 and b > 0.95:
+                # Detectar Blanco (R, G y B son muy cercanos a 1.0)
+                if r > 0.98 and g > 0.98 and b > 0.98:
                     blancos += 1
-                # Detectar Gris (R, G y B son iguales pero menores a 1)
-                elif r < 0.9 and abs(r - g) < 0.05 and abs(g - b) < 0.05:
+                # Detectar Gris (Tonalidades iguales por debajo de 1.0)
+                elif r < 0.95 and abs(r - g) < 0.05 and abs(g - b) < 0.05:
                     grises += 1
         
         return blancos, grises
@@ -99,7 +102,6 @@ def load_asignados_counts():
 
 try:
     df = load_data()
-    # Cargamos los nuevos datos de la hoja ASIGNADOS
     pend_realizar, pend_adecuacion = load_asignados_counts()
     
     # Lógica de Semanas (Jueves a Miércoles)
@@ -118,7 +120,6 @@ try:
     # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
-    
     with k1:
         val_hoy = len(df[df['Fecha_Limpia'] == hoy_vzla])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{val_hoy}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
@@ -132,7 +133,7 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN NUEVA: ESTADO DE ASIGNACIONES (Cuadros solicitados) ---
+    # --- SECCIÓN: ESTADO DE ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1:
@@ -143,11 +144,9 @@ try:
     # --- SECCIÓN EFICIENCIA (Promedios) ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2, e3, e4 = st.columns(4)
-
     total_inst = len(df) if len(df) > 0 else 1
     media_metros = df['Metraje'].sum() / total_inst
     media_tensores = df['Tensores'].sum() / total_inst
-
     with e1:
         st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{media_metros:.2f}</div><div class='m-sub'>Mts por instalación</div></div>", unsafe_allow_html=True)
     with e2:
@@ -159,9 +158,7 @@ try:
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "NaN", "0", "0.0"])].head(12)
-
-    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', 
-                      text_auto=True, color='Servicios', color_continuous_scale='Blues')
+    fig_tech = px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues')
     fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
@@ -171,19 +168,14 @@ try:
     with c1:
         df_hist = df.dropna(subset=['Fecha_DT']).copy()
         df_hist = df_hist[df_hist['Fecha_DT'].dt.date <= hoy_vzla]
-        
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
         df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
-        
-        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-        df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
-        
+        meses_n = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+        df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
-        
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
             st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
-    
     with c2:
         total_gen = len(df)
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{total_gen:,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
