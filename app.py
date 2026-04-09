@@ -63,8 +63,8 @@ def load_asignados_counts():
         ).execute()
         
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        pendientes_realizar = 0
-        adecuacion_caja = 0    
+        pendientes_realizar = 0 # Color #efefef
+        adecuacion_caja = 0     # Color #d9d9d9
         
         # Conversión HEX a RGB (0 a 1)
         # #efefef -> 0.937, 0.937, 0.937
@@ -123,8 +123,8 @@ try:
     # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Color #efefef</div></div>", unsafe_allow_html=True)
-    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Color #d9d9d9</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'></div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'></div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN EFICIENCIA ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
