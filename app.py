@@ -33,14 +33,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Mantenida la lógica de éxito de fechas)
+# 3. CARGA DE DATOS (Código original proporcionado por el usuario - NO TOCADO)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
     
-    # --- LA CLAVE PARA LOS 237 DE FEBRERO (Sin tocar) ---
+    # --- LA CLAVE PARA LOS 237 DE FEBRERO ---
     df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], format='%d/%m/%Y', exact=False, errors='coerce')
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
     
@@ -50,7 +50,7 @@ def load_data():
     
     return df
 
-# 4. FUNCIÓN PARA CONTAR COLORES (Corregida para ignorar blancos sin texto)
+# 4. FUNCIÓN PARA CONTAR COLORES (Corregida con filtro estricto de texto)
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
@@ -73,15 +73,16 @@ def load_asignados_counts():
         
         for row in rows:
             cells = row.get('values', [])
-            # Validamos que la Columna B (indice 1) tenga texto real
+            # Verificamos si la Columna B (indice 1) tiene texto (Plan)
             if len(cells) > 1:
-                val_b = cells[1].get('formattedValue', "").strip()
+                # OBTENEMOS EL TEXTO REAL DE LA CELDA
+                plan_text = cells[1].get('formattedValue', '').strip()
                 
-                # SI NO HAY TEXTO EN LA COLUMNA B, IGNORAMOS LA FILA POR COMPLETO
-                if not val_b:
+                # REGLA CRÍTICA: Si no hay texto escrito, ignoramos la fila por completo
+                if not plan_text or len(plan_text) < 1:
                     continue
-
-                # Si llegamos aquí, es que hay texto. Ahora miramos el color.
+                
+                # Si hay texto, procedemos a ver el color
                 format_info = cells[1].get('effectiveFormat', {})
                 bg = format_info.get('backgroundColor', {})
                 
@@ -89,12 +90,12 @@ def load_asignados_counts():
                 g = bg.get('green', 1.0)
                 b = bg.get('blue', 1.0)
                 
-                # Detectar Blanco (R, G y B son muy cercanos a 1.0)
-                if r > 0.98 and g > 0.98 and b > 0.98:
-                    blancos += 1
-                # Detectar Gris (Tonalidades iguales por debajo de 1.0)
-                elif r < 0.95 and abs(r - g) < 0.05 and abs(g - b) < 0.05:
+                # Detectar Gris: Si R, G y B son iguales y menores a 0.95
+                if r < 0.95 and abs(r - g) < 0.02 and abs(g - b) < 0.02:
                     grises += 1
+                # En cualquier otro caso, si tiene texto y no es gris, es blanca (pendiente realizar)
+                else:
+                    blancos += 1
         
         return blancos, grises
     except:
@@ -102,6 +103,7 @@ def load_asignados_counts():
 
 try:
     df = load_data()
+    # Cargamos los nuevos datos filtrados de la hoja ASIGNADOS
     pend_realizar, pend_adecuacion = load_asignados_counts()
     
     # Lógica de Semanas (Jueves a Miércoles)
@@ -133,13 +135,13 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN: ESTADO DE ASIGNACIONES ---
+    # --- SECCIÓN: ESTADO DE ASIGNACIONES (Cuadros solicitados) ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Filas Blancas</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Filas Blancas con Texto</div></div>", unsafe_allow_html=True)
     with a2:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Filas Grises</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Filas Grises con Texto</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN EFICIENCIA (Promedios) ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
@@ -170,8 +172,8 @@ try:
         df_hist = df_hist[df_hist['Fecha_DT'].dt.date <= hoy_vzla]
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month
         df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
-        meses_n = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-        df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
+        meses_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+        df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_nombres)
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
         st.write("📂 **Cierre Mensual**")
         for _, row in hist.iterrows():
