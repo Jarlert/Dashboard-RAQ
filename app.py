@@ -63,8 +63,8 @@ def load_asignados_counts():
         ).execute()
         
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        pendientes_realizar = 0 # Color #efefef
-        adecuacion_caja = 0    # Color #d9d9d9
+        pendientes_realizar = 0
+        adecuacion_caja = 0    
         
         # Conversión HEX a RGB (0 a 1)
         # #efefef -> 0.937, 0.937, 0.937
