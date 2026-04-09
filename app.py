@@ -8,7 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO (Cada 60 seg)
+# 1. CONFIGURACIÓN DE PÁGINA Y AUTO-REFRESCO
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh")
 
@@ -33,24 +33,19 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. CARGA DE DATOS (Tu lógica de éxito intacta para los 237 de febrero)
+# 3. CARGA DE DATOS PRINCIPAL (Mantenida tu lógica de éxito de febrero)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df.dropna(subset=["Marca temporal"], how='all')
-    
-    # --- LA CLAVE PARA LOS 237 DE FEBRERO ---
     df['Fecha_DT'] = pd.to_datetime(df["Marca temporal"], format='%d/%m/%Y', exact=False, errors='coerce')
     df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
-    
-    # Limpieza de números
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
-    
     return df
 
-# 4. FUNCIÓN PARA CONTAR COLORES (Lógica de humano: ¿Hay algo escrito? -> ¿De qué color es?)
+# 4. FUNCIÓN PARA CONTAR POR COLOR ESPECÍFICO (#45818e)
 @st.cache_data(ttl=30)
 def load_asignados_counts():
     try:
@@ -59,7 +54,7 @@ def load_asignados_counts():
         service = build('sheets', 'v4', credentials=creds)
         
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        range_name = "ASIGNADOS!B:B" # Miramos la columna B (Plan)
+        range_name = "ASIGNADOS!B:B" # Columna del Plan
         
         result = service.spreadsheets().get(
             spreadsheetId=spreadsheet_id, 
@@ -68,47 +63,48 @@ def load_asignados_counts():
         ).execute()
         
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        blancos = 0
-        grises = 0
+        pendientes_realizar = 0 # Blancas con texto
+        adecuacion_caja = 0    # Color #45818e con texto
+        
+        # Valores RGB para el color #45818e (R:69, G:129, B:142)
+        target_r, target_g, target_b = 0.270, 0.505, 0.556
         
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
             
             cell_b = cells[0]
+            # Solo procesamos si la celda tiene texto visible (Formatted Value)
+            texto = cell_b.get('formattedValue', '').strip()
             
-            # PASO 1: ¿Hay algo escrito? (formattedValue es lo que ves tú en pantalla)
-            texto_en_pantalla = cell_b.get('formattedValue', '').strip()
-            
-            # Si la celda está vacía, no nos interesa, pasamos a la siguiente.
-            if not texto_en_pantalla or texto_en_pantalla == "":
-                continue
-            
-            # PASO 2: Si hay algo escrito, ¿De qué color es?
-            bg = cell_b.get('effectiveFormat', {}).get('backgroundColor', {})
-            r = bg.get('red', 1.0)
-            g = bg.get('green', 1.0)
-            b = bg.get('blue', 1.0)
-            
-            # Definición de GRIS: Canales de color iguales y menores a 1 (ej: 0.8, 0.8, 0.8)
-            if r < 0.98 and abs(r - g) < 0.02 and abs(g - b) < 0.02:
-                grises += 1
-            else:
-                # Si hay texto y NO es gris, entonces es blanca (el color por defecto)
-                blancos += 1
+            if len(texto) > 0:
+                bg = cell_b.get('effectiveFormat', {}).get('backgroundColor', {})
+                r = bg.get('red', 1.0)
+                g = bg.get('green', 1.0)
+                b = bg.get('blue', 1.0)
+                
+                # Comprobamos si es el color específico solicitado (#45818e)
+                # Usamos una tolerancia mínima (0.02)
+                is_target_color = (abs(r - target_r) < 0.02 and 
+                                   abs(g - target_g) < 0.02 and 
+                                   abs(b - target_b) < 0.02)
+                
+                if is_target_color:
+                    adecuacion_caja += 1
+                elif r > 0.98 and g > 0.98 and b > 0.98:
+                    # Es blanca y tiene texto
+                    pendientes_realizar += 1
         
-        return blancos, grises
+        return pendientes_realizar, adecuacion_caja
     except:
         return 0, 0
 
 try:
     df = load_data()
-    # Cargamos los nuevos datos con la lógica visual corregida
     pend_realizar, pend_adecuacion = load_asignados_counts()
     
-    # Lógica de Semanas (Jueves a Miércoles)
-    def get_jueves(d):
-        return d - timedelta(days=(d.isoweekday() - 4) % 7)
+    # Lógica Semanas
+    def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
     inicio_sem_actual = get_jueves(hoy_vzla)
     fin_sem_actual = inicio_sem_actual + timedelta(days=6)
     inicio_sem_pasada = inicio_sem_actual - timedelta(days=7)
@@ -118,13 +114,11 @@ try:
     st.markdown("<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Venezuela: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
+    # --- RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
-    with k2:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == ayer_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+    with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
+    with k2: st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == ayer_vzla])}</div><div class='m-sub'>Instalaciones</div></div>", unsafe_allow_html=True)
     with k3:
         val_sem = len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
@@ -132,24 +126,20 @@ try:
         val_pas = len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])
         st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN: ESTADO DE ASIGNACIONES (Cuadros solicitados) ---
+    # --- ESTADO DE ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Blancas con Texto</div></div>", unsafe_allow_html=True)
-    with a2:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Grises con Texto</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>Tendidos Pendientes por realizar</div><div class='m-value'>{pend_realizar}</div><div class='m-sub'>Blancas con texto</div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>Pendientes por Adecuación o Caja</div><div class='m-value'>{pend_adecuacion}</div><div class='m-sub'>Color #45818e</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN EFICIENCIA (Promedios) ---
+    # --- EFICIENCIA ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2, e3, e4 = st.columns(4)
     total_inst = len(df) if len(df) > 0 else 1
-    with e1:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{df['Metraje'].sum()/total_inst:.2f}</div><div class='m-sub'>Mts por instalación</div></div>", unsafe_allow_html=True)
-    with e2:
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Tensores</div><div class='m-value'>{df['Tensores'].sum()/total_inst:.2f}</div><div class='m-sub'>Und por instalación</div></div>", unsafe_allow_html=True)
+    with e1: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{df['Metraje'].sum()/total_inst:.2f}</div><div class='m-sub'>Mts por instalación</div></div>", unsafe_allow_html=True)
+    with e2: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Tensores</div><div class='m-value'>{df['Tensores'].sum()/total_inst:.2f}</div><div class='m-sub'>Und por instalación</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: PRODUCTIVIDAD ---
+    # --- PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
@@ -159,7 +149,7 @@ try:
     fig_tech.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=450, margin=dict(l=0,r=0,t=0,b=0))
     st.plotly_chart(fig_tech, use_container_width=True)
 
-    # --- SECCIÓN 3: HISTORIAL ---
+    # --- HISTORIAL ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -171,8 +161,7 @@ try:
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
         st.write("📂 **Cierre Mensual**")
-        for _, row in hist.iterrows():
-            st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
+        for _, row in hist.iterrows(): st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
     with c2:
         st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global de Instalaciones</div><div style='font-size: 72px; font-weight: 800; line-height: 1;'>{len(df):,}</div><div style='font-size: 13px; margin-top: 10px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
 
