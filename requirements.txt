@@ -4,3 +4,5 @@ plotly
 st-gsheets-connection
 streamlit-autorefresh
 pytz
+google-api-python-client
+google-auth
