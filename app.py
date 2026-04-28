@@ -44,24 +44,16 @@ st.markdown("""
     .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 12px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     
-    /* Estilo para items en una sola línea */
     .cliente-item { 
-        font-size: 9px; 
-        padding: 6px 10px; 
-        margin-bottom: 3px; 
-        border-radius: 4px; 
-        color: #000 !important; 
-        font-weight: 600; 
-        white-space: nowrap; 
-        overflow: hidden; 
-        text-overflow: ellipsis;
-        border: 1px solid rgba(0,0,0,0.1);
+        font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; 
+        color: #000 !important; font-weight: 600; white-space: nowrap; 
+        overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1);
     }
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #a5aebc; color: #000 !important; }
-    .bg-blue { background-color: #00ffff; color: #fff !important; }
+    .bg-grey { background-color: #a5aebc; color: #000 !important; } /* Nuevo Gris Adecuación */
+    .bg-cyan { background-color: #00ffff; color: #000 !important; } /* Nuevo Azul Devolución */
     
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     p, span, label { color: #ffffff !important; }
@@ -109,12 +101,15 @@ def load_asignados_aggregates():
             if not bg: r = g = b = 1.0
             else:
                 r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
-            if abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 
-            elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1 
+            
+            # Detección de #a5aebc (Gris Adecuación)
+            if abs(r-0.647) < 0.03 and abs(g-0.682) < 0.03 and abs(b-0.737) < 0.03: p_adecuacion += 1
+            # Detección de #efefef (Pendientes por realizar)
+            elif abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS)
+# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Nuevos Colores)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -133,8 +128,7 @@ def get_today_ruta():
             val_j = cells[9].get('formattedValue', '').lower().strip()
             val_h = cells[7].get('formattedValue', '').strip()
             if any(v in val_j for v in variantes_hoy) and not val_h:
-                found_today = True
-                continue
+                found_today = True; continue
             if found_today:
                 if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
@@ -144,10 +138,15 @@ def get_today_ruta():
                         if not bg: r = g = b = 1.0
                         else:
                             r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+                        
                         color_key = "white"
+                        # VERDE (Activados)
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
-                        elif abs(r-0.85) < 0.05 and abs(g-0.85) < 0.05: color_key = "grey"
-                        elif r > 0.8 and g < 0.5 and b < 0.5: color_key = "red"
+                        # GRIS #a5aebc (Adecuación)
+                        elif abs(r-0.647) < 0.05 and abs(g-0.682) < 0.05: color_key = "grey"
+                        # CYAN #00ffff (Devueltos)
+                        elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
+                        
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
@@ -180,24 +179,20 @@ try:
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 3: CONTROL DE RUTA (LÍNEA ÚNICA) ---
+    # --- SECCIÓN 3: CONTROL DE RUTA ---
     st.markdown("<div class='section-title'>Control de Ruta - Clientes de Hoy</div>", unsafe_allow_html=True)
     c_ruta, c_act, c_ade, c_dev = st.columns(4)
+    def render_cliente(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre'][:15]} | {c['zona'][:10]} | ({c['tipo']})</div>"
     
-    # Función de renderizado en una sola línea
-    def render_cliente(c): 
-        return f"<div class='cliente-item bg-{c['color']}' title='{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})'>{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
-    
-    with c_ruta:
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_cliente(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
+    with c_ruta: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_cliente(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
     with c_act:
         act = [c for c in ruta_hoy if c['color'] == 'green']
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ACTIVADOS</span><span>TOTAL: {len(act)}</span></div>{''.join([render_cliente(c) for c in act])}</div>", unsafe_allow_html=True)
     with c_ade:
         ade = [c for c in ruta_hoy if c['color'] == 'grey']
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN O CAJA</span><span>TOTAL: {len(ade)}</span></div>{''.join([render_cliente(c) for c in ade])}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN</span><span>TOTAL: {len(ade)}</span></div>{''.join([render_cliente(c) for c in ade])}</div>", unsafe_allow_html=True)
     with c_dev:
-        dev = [c for c in ruta_hoy if c['color'] == 'red']
+        dev = [c for c in ruta_hoy if c['color'] == 'cyan']
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>DEVUELTOS</span><span>TOTAL: {len(dev)}</span></div>{''.join([render_cliente(c) for c in dev])}</div>", unsafe_allow_html=True)
 
     # --- SECCIÓN 4: EFICIENCIA ---
