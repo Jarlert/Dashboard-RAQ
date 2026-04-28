@@ -195,7 +195,7 @@ try:
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ACTIVADOS</span><span>TOTAL: {len(act)}</span></div>{''.join([render_cliente(c) for c in act])}</div>", unsafe_allow_html=True)
     with c_ade:
         ade = [c for c in ruta_hoy if c['color'] == 'grey']
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN</span><span>TOTAL: {len(ade)}</span></div>{''.join([render_cliente(c) for c in ade])}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN O CAJA</span><span>TOTAL: {len(ade)}</span></div>{''.join([render_cliente(c) for c in ade])}</div>", unsafe_allow_html=True)
     with c_dev:
         dev = [c for c in ruta_hoy if c['color'] == 'red']
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>DEVUELTOS</span><span>TOTAL: {len(dev)}</span></div>{''.join([render_cliente(c) for c in dev])}</div>", unsafe_allow_html=True)
