@@ -19,18 +19,19 @@ hoy_vzla = ahora_vzla.date()
 ayer_vzla = hoy_vzla - timedelta(days=1)
 
 def get_fecha_str_vzla():
-    # CORRECCIÓN DE ÍNDICE: Python 0=Lunes, 1=Martes... 6=Domingo
+    # Ajuste de días: Lunes=0 ... Domingo=6
     dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     nombre_dia = dias[ahora_vzla.weekday()]
     return f"{nombre_dia} {ahora_vzla.strftime('%d/%m/%y')}"
 
-# 2. ESTILO CSS DARK PREMIUM (Tamaños iguales y estética Imagen 2)
+# 2. ESTILO CSS DARK PREMIUM (Simetría total)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
     
+    /* Tarjetas con altura fija para simetría */
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); 
         border: 1px solid rgba(255, 255, 255, 0.1); 
@@ -47,7 +48,7 @@ st.markdown("""
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; }
     
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 350px; overflow-y: auto; }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 12px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 10px; padding: 4px 8px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; line-height: 1.1; border: 1px solid rgba(0,0,0,0.1); }
     
@@ -55,38 +56,42 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #d9d9d9; color: #000 !important; }
     .bg-red { background-color: #ff4d4d; color: #fff !important; }
-    .bg-custom { background-color: #efefef; color: #000 !important; }
+    .bg-pend { background-color: #45818e; color: #fff !important; }
     
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     p, span, label { color: #ffffff !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO SEGÚN REGLA - Recupera los 237 de febrero)
+# 3. MOTOR DE CARGA (CONGELADO Y CORREGIDO PARA NO PERDER DATOS)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
+
     def parse_individual_date(val):
-        val_str = str(val).strip()
+        v = str(val).strip().lower()
+        if not v or v == 'none': return None
+        # 1. Intentar como número (Excel Serial)
         try:
-            if val_str.replace('.','').isdigit():
-                return pd.to_datetime(float(val_str), unit='D', origin='1899-12-30').date()
+            if v.replace('.','').isdigit() and float(v) > 40000:
+                return pd.to_datetime(float(v), unit='D', origin='1899-12-30').date()
         except: pass
-        try: return datetime.strptime(val_str[:10], '%d/%m/%Y').date()
-        except: pass
-        try: return datetime.strptime(val_str[:10], '%Y-%m-%d').date()
-        except: pass
-        try: return pd.to_datetime(val_str, dayfirst=True, errors='coerce').date()
-        except: return None
+        # 2. Intentar formatos comunes
+        for fmt in ('%d/%m/%Y', '%d/%m/%y', '%Y-%m-%d'):
+            try: return datetime.strptime(v[:10], fmt).date()
+            except: continue
+        # 3. Fallback
+        return pd.to_datetime(v, dayfirst=True, errors='coerce').date()
+
     df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. AGREGADOS ASIGNADOS (#efefef y #d9d9d9)
+# 4. AGREGADOS ASIGNADOS (Basado en Colores #45818e y #d9d9d9)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -97,17 +102,22 @@ def load_asignados_aggregates():
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!B:B"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         p_realizar, p_adecuacion = 0, 0
+        
+        # RGB para #45818e (0.27, 0.50, 0.56) y #d9d9d9 (0.85, 0.85, 0.85)
         for row in rows:
             cells = row.get('values', [])
-            if not cells or 'userEnteredValue' not in cells[0]: continue
+            if not cells or 'formattedValue' not in cells[0]: continue
             bg = cells[0].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
-            if abs(r - 0.937) < 0.01 and abs(g - 0.937) < 0.01 and abs(b - 0.937) < 0.01: p_realizar += 1
-            elif abs(r - 0.851) < 0.01 and abs(g - 0.851) < 0.01 and abs(b - 0.851) < 0.01: p_adecuacion += 1
+            
+            # #45818e
+            if abs(r-0.27) < 0.05 and abs(g-0.50) < 0.05 and abs(b-0.56) < 0.05: p_realizar += 1
+            # #d9d9d9
+            elif abs(r-0.85) < 0.05 and abs(g-0.85) < 0.05 and abs(b-0.85) < 0.05: p_adecuacion += 1
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Corregido para búsqueda insensible a acentos)
+# 5. MOTOR RUTA HOY (Corregido para Martes 28/04/26)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -118,27 +128,33 @@ def get_today_ruta():
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["99+ RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
-        target_date = get_fecha_str_vzla().lower().replace('é','e')
-        found_today, clientes = False, []
+        # Buscamos hoy con y sin acentos
+        t_date = get_fecha_str_vzla().lower()
+        t_date_alt = t_date.replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
         
+        found_today, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
             if not cells or len(cells) < 10: continue
-            val_j = cells[9].get('formattedValue', '').lower().replace('é','e')
+            val_j = cells[9].get('formattedValue', '').lower()
+            val_j_clean = val_j.replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
             
-            if target_date in val_j: found_today = True; continue
+            if t_date_alt in val_j_clean: found_today = True; continue
             if found_today:
-                if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]): break
+                if "/" in val_j and any(d in val_j_clean for d in ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]): break
                 try:
                     contrato, nombre = cells[7].get('formattedValue', '').strip(), cells[9].get('formattedValue', '').strip()
                     if contrato and nombre and len(nombre) > 3:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
                         bg = cells[9].get('effectiveFormat', {}).get('backgroundColor', {})
                         r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
+                        
                         color_key = "white"
                         if r < 0.3 and g > 0.8 and b < 0.3: color_key = "green"
-                        elif abs(r - 0.85) < 0.1 and abs(g - 0.85) < 0.1 and abs(b - 0.85) < 0.1: color_key = "grey"
+                        elif abs(r-0.85) < 0.05: color_key = "grey"
                         elif r > 0.8 and g < 0.3 and b < 0.3: color_key = "red"
+                        elif abs(r-0.27) < 0.05: color_key = "pend"
+                        
                         clientes.append({'contrato': contrato, 'nombre': nombre, 'zona': cells[12].get('formattedValue', '').strip(), 'tipo': tipo, 'color': color_key})
                 except: continue
         return clientes
@@ -159,7 +175,7 @@ try:
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Vzla: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
+    # --- SECCIÓN 1: RENDIMIENTO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -170,7 +186,7 @@ try:
     # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div><div class='m-sub'>Color #efefef</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div><div class='m-sub'>Color #45818e</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div><div class='m-sub'>Color #d9d9d9</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN 3: CONTROL DE RUTA ---
@@ -203,7 +219,7 @@ try:
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
     st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
-    # --- SECCIÓN 6: HISTORIAL ---
+    # --- SECCIÓN 6: HISTORIAL (CORREGIDO TOTAL) ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
     with col_h1:
