@@ -52,8 +52,8 @@ st.markdown("""
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #a5aebc; color: #000 !important; } /* Nuevo Gris Adecuación */
-    .bg-cyan { background-color: #00ffff; color: #000 !important; } /* Nuevo Azul Devolución */
+    .bg-grey { background-color: #d9d9d9; color: #000 !important; } /* Gris #d9d9d9 */
+    .bg-cyan { background-color: #00ffff; color: #000 !important; }
     
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     p, span, label { color: #ffffff !important; }
@@ -83,7 +83,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - General)
+# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - Gris #d9d9d9)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -102,14 +102,14 @@ def load_asignados_aggregates():
             else:
                 r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
             
-            # Detección de #a5aebc (Gris Adecuación)
-            if abs(r-0.647) < 0.03 and abs(g-0.682) < 0.03 and abs(b-0.737) < 0.03: p_adecuacion += 1
-            # Detección de #efefef (Pendientes por realizar)
+            # Detección de #d9d9d9 (Gris Adecuación) -> RGB aprox 0.851
+            if abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03 and abs(b-0.851) < 0.03: p_adecuacion += 1
+            # Detección de #efefef (Pendientes por realizar) -> RGB aprox 0.937
             elif abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Nuevos Colores)
+# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Gris #d9d9d9)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -140,10 +140,9 @@ def get_today_ruta():
                             r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
                         
                         color_key = "white"
-                        # VERDE (Activados)
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
-                        # GRIS #a5aebc (Adecuación)
-                        elif abs(r-0.647) < 0.05 and abs(g-0.682) < 0.05: color_key = "grey"
+                        # GRIS #d9d9d9 (Adecuación)
+                        elif abs(r-0.851) < 0.05 and abs(g-0.851) < 0.05: color_key = "grey"
                         # CYAN #00ffff (Devueltos)
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
                         
