@@ -60,8 +60,8 @@ st.markdown("""
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #d9d9d9; color: #000 !important; }
-    .bg-red { background-color: #ff4d4d; color: #fff !important; }
+    .bg-grey { background-color: #a5aebc; color: #000 !important; }
+    .bg-blue { background-color: #00ffff; color: #fff !important; }
     
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     p, span, label { color: #ffffff !important; }
