@@ -25,7 +25,7 @@ def get_fecha_variantes_vzla():
     v2 = f"{nombre_dia} {ahora_vzla.day}/{ahora_vzla.month}/{ahora_vzla.strftime('%y')}"
     return [v1.lower(), v2.lower()]
 
-# 2. ESTILO CSS DARK PREMIUM
+# 2. ESTILO CSS DARK PREMIUM (Simetría total 110px)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -55,7 +55,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO - Registros de Febrero y Marzo Protegidos)
+# 3. MOTOR DE CARGA (CONGELADO - Datos Históricos Protegidos)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -78,7 +78,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - General)
+# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - Corregido Motor de Color)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -93,13 +93,16 @@ def load_asignados_aggregates():
             cells = row.get('values', [])
             if not cells or 'formattedValue' not in cells[0]: continue
             bg = cells[0].get('effectiveFormat', {}).get('backgroundColor', {})
-            r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
-            if abs(r - 0.937) < 0.01: p_realizar += 1 
-            elif abs(r - 0.851) < 0.01: p_adecuacion += 1 
+            # Si el fondo existe, los canales faltantes son 0. Si no existe, es blanco (1,1,1)
+            r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+            if not bg: r = g = b = 1.0
+            
+            if abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 # #efefef
+            elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1 # #d9d9d9
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Corregida)
+# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Corregido Motor de Color)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -107,7 +110,6 @@ def get_today_ruta():
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        # Nombre de hoja corregido a "RUTAS PRE PLANIFICADAS"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
@@ -126,33 +128,24 @@ def get_today_ruta():
                 continue
             
             if found_today:
-                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h:
-                    break
-                
+                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
-                        serial_val = cells[4].get('formattedValue', '').lower()
-                        zona = cells[12].get('formattedValue', '').strip()
-                        tipo = "M" if "mudanza" in serial_val else "N"
-                        
-                        # Lógica de color mejorada para detectar VERDE
+                        tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
                         bg = cells[9].get('effectiveFormat', {}).get('backgroundColor', {})
-                        r = bg.get('red', 1.0)
-                        g = bg.get('green', 1.0)
-                        b = bg.get('blue', 1.0)
+                        # Lógica de color robusta
+                        if not bg: r = g = b = 1.0
+                        else:
+                            r = bg.get('red', 0.0)
+                            g = bg.get('green', 0.0)
+                            b = bg.get('blue', 0.0)
                         
                         color_key = "white"
-                        # Si el Verde es predominante y alto, es ACTIVADO
-                        if g > r and g > b and g > 0.5: 
-                            color_key = "green"
-                        # Si es gris
-                        elif abs(r-0.85) < 0.1 and abs(g-0.85) < 0.1: 
-                            color_key = "grey"
-                        # Si es rojo
-                        elif r > g and r > b and r > 0.5: 
-                            color_key = "red"
+                        if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
+                        elif abs(r-0.85) < 0.05 and abs(g-0.85) < 0.05: color_key = "grey"
+                        elif r > 0.8 and g < 0.5 and b < 0.5: color_key = "red"
                         
-                        clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': zona, 'tipo': tipo, 'color': color_key})
+                        clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
     except: return []
@@ -163,10 +156,8 @@ try:
     ruta_hoy = get_today_ruta()
     
     def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
-    inicio_sem_actual = get_jueves(hoy_vzla)
-    fin_sem_actual = inicio_sem_actual + timedelta(days=6)
-    inicio_sem_pasada = inicio_sem_actual - timedelta(days=7)
-    fin_sem_pasada = inicio_sem_actual - timedelta(days=1)
+    inicio_sem_actual = get_jueves(hoy_vzla); fin_sem_actual = inicio_sem_actual + timedelta(days=6)
+    inicio_sem_pasada = inicio_sem_actual - timedelta(days=7); fin_sem_pasada = inicio_sem_actual - timedelta(days=1)
 
     # --- HEADER ---
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
@@ -180,7 +171,7 @@ try:
     with k3: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: ESTADO ASIGNACIONES (Subtítulos de color eliminados) ---
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
