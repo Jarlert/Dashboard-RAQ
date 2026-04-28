@@ -23,16 +23,31 @@ def get_fecha_str_vzla():
     nombre_dia = dias[ahora_vzla.weekday() if ahora_vzla.weekday() != 6 else 0]
     return f"{nombre_dia} {ahora_vzla.strftime('%d/%m/%y')}"
 
-# 2. ESTILO CSS DARK PREMIUM (Basado en Estética de Imagen 2)
+# 2. ESTILO CSS DARK PREMIUM (Corregido para tamaños iguales)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
+    
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
-    .metric-container { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 10px; text-align: center; }
-    .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .m-value { color: #ffffff; font-size: 22px; font-weight: 700; }
-    .m-sub { color: #00d4ff; font-size: 9px; }
+    
+    /* Contenedor de métricas con ALTURA FIJA para que todos sean iguales */
+    .metric-container { 
+        background: rgba(255, 255, 255, 0.05); 
+        border: 1px solid rgba(255, 255, 255, 0.1); 
+        padding: 15px; 
+        border-radius: 10px; 
+        text-align: center;
+        height: 110px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+    .m-value { color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1; }
+    .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; }
     
     .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 350px; overflow-y: auto; }
     .ruta-header { font-size: 12px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
@@ -48,33 +63,44 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA HÍBRIDO (Recupera los datos perdidos de la Imagen 4)
+# 3. MOTOR DE CARGA ULTRA-ROBUSTO (Recupera los 280 de Marzo y 237 de Febrero)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
-    
-    def parse_dates_infalible(series):
-        # Intento 1: Formato Día-Mes-Año (Estricto)
-        dates = pd.to_datetime(series, dayfirst=True, errors='coerce')
-        # Intento 2: Traducir Números Serie de Excel (El motivo de los datos perdidos)
-        mask = dates.isna()
-        if mask.any():
-            seriales = pd.to_numeric(series[mask], errors='coerce')
-            dates[mask] = pd.to_datetime(seriales, unit='D', origin='1899-12-30').dt.round('1s')
-        # Intento 3: Formato genérico
-        mask = dates.isna()
-        if mask.any(): dates[mask] = pd.to_datetime(series[mask], errors='coerce')
-        return dates
 
-    df['Fecha_DT'] = parse_dates_infalible(df["Marca temporal"])
-    df['Fecha_Limpia'] = df['Fecha_DT'].dt.date
+    def parse_individual_date(val):
+        val_str = str(val).strip()
+        # 1. Intentar como número (Excel Serial)
+        try:
+            if val_str.replace('.','').isdigit():
+                return pd.to_datetime(float(val_str), unit='D', origin='1899-12-30').date()
+        except: pass
+        # 2. Intentar formato Latino DD/MM/YYYY
+        try:
+            return datetime.strptime(val_str[:10], '%d/%m/%Y').date()
+        except: pass
+        # 3. Intentar formato ISO YYYY-MM-DD
+        try:
+            return datetime.strptime(val_str[:10], '%Y-%m-%d').date()
+        except: pass
+        # 4. Fallback flexible de Pandas
+        try:
+            return pd.to_datetime(val_str, dayfirst=True, errors='coerce').date()
+        except:
+            return None
+
+    # Aplicamos el motor celda por celda para no perder ni un contrato
+    df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
+    # Columna auxiliar para el historial mensual
+    df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
+    
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. AGREGADOS ASIGNADOS (#efefef y #d9d9d9 con validación de valor real)
+# 4. AGREGADOS ASIGNADOS
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -95,7 +121,7 @@ def load_asignados_aggregates():
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA (H, J, E, M) - Filtrado estricto para hoy
+# 5. MOTOR RUTA HOY
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -134,7 +160,6 @@ try:
     agg_realizar, agg_adecuacion = load_asignados_aggregates()
     ruta_hoy = get_today_ruta()
     
-    # Lógica Semanas
     def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
     inicio_sem_actual = get_jueves(hoy_vzla)
     fin_sem_actual = inicio_sem_actual + timedelta(days=6)
@@ -145,7 +170,7 @@ try:
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Vzla: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: RENDIMIENTO (IGUAL A IMAGEN 2) ---
+    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -153,7 +178,7 @@ try:
     with k3: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 2: ESTADO ASIGNACIONES (IGUAL A IMAGEN 2) ---
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div><div class='m-sub'>Color #efefef</div></div>", unsafe_allow_html=True)
@@ -164,24 +189,18 @@ try:
     c_ruta, c_act, c_ade, c_dev = st.columns(4)
     def render_cliente(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre'][:15].upper()}<br>{c['zona']} ({c['tipo']})</div>"
     with c_ruta: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_cliente(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
-    with c_act:
-        act = [c for c in ruta_hoy if c['color'] == 'green']
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ACTIVADOS</span><span>TOTAL: {len(act)}</span></div>{''.join([render_cliente(c) for c in act])}</div>", unsafe_allow_html=True)
-    with c_ade:
-        ade = [c for c in ruta_hoy if c['color'] == 'grey']
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN</span><span>TOTAL: {len(ade)}</span></div>{''.join([render_cliente(c) for c in ade])}</div>", unsafe_allow_html=True)
-    with c_dev:
-        dev = [c for c in ruta_hoy if c['color'] == 'red']
-        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>DEVUELTOS</span><span>TOTAL: {len(dev)}</span></div>{''.join([render_cliente(c) for c in dev])}</div>", unsafe_allow_html=True)
+    with c_act: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ACTIVADOS</span><span>TOTAL: {len([c for c in ruta_hoy if c['color']=='green'])}</span></div>{''.join([render_cliente(c) for c in ruta_hoy if c['color']=='green'])}</div>", unsafe_allow_html=True)
+    with c_ade: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ADECUACIÓN</span><span>TOTAL: {len([c for c in ruta_hoy if c['color']=='grey'])}</span></div>{''.join([render_cliente(c) for c in ruta_hoy if c['color']=='grey'])}</div>", unsafe_allow_html=True)
+    with c_dev: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>DEVUELTOS</span><span>TOTAL: {len([c for c in ruta_hoy if c['color']=='red'])}</span></div>{''.join([render_cliente(c) for c in ruta_hoy if c['color']=='red'])}</div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN: EFICIENCIA ---
+    # --- SECCIÓN 4: EFICIENCIA ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2 = st.columns(2)
     t_inst = len(df) if len(df) > 0 else 1
     with e1: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{df['Metraje'].sum()/t_inst:.2f}</div></div>", unsafe_allow_html=True)
     with e2: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Tensores</div><div class='m-value'>{df['Tensores'].sum()/t_inst:.2f}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 4: PRODUCTIVIDAD ---
+    # --- SECCIÓN 5: PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
@@ -189,7 +208,7 @@ try:
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
     st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
-    # --- SECCIÓN 5: HISTORIAL (CORREGIDO BASADO EN IMAGEN 1) ---
+    # --- SECCIÓN 6: HISTORIAL (CORREGIDO) ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
     with col_h1:
