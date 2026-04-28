@@ -25,7 +25,7 @@ def get_fecha_variantes_vzla():
     v2 = f"{nombre_dia} {ahora_vzla.day}/{ahora_vzla.month}/{ahora_vzla.strftime('%y')}"
     return [v1.lower(), v2.lower()]
 
-# 2. ESTILO CSS DARK PREMIUM (Simetría total 110px)
+# 2. ESTILO CSS DARK PREMIUM
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -43,7 +43,20 @@ st.markdown("""
     
     .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 12px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
-    .cliente-item { font-size: 10px; padding: 4px 8px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; line-height: 1.1; border: 1px solid rgba(0,0,0,0.1); }
+    
+    /* Estilo para items en una sola línea */
+    .cliente-item { 
+        font-size: 9px; 
+        padding: 6px 10px; 
+        margin-bottom: 3px; 
+        border-radius: 4px; 
+        color: #000 !important; 
+        font-weight: 600; 
+        white-space: nowrap; 
+        overflow: hidden; 
+        text-overflow: ellipsis;
+        border: 1px solid rgba(0,0,0,0.1);
+    }
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
@@ -55,7 +68,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO - Datos Históricos Protegidos)
+# 3. MOTOR DE CARGA (CONGELADO - Registros de Febrero y Marzo Protegidos)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -78,7 +91,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     return df
 
-# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - Corregido Motor de Color)
+# 4. AGREGADOS ASIGNADOS (Hoja ASIGNADOS - General)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -93,16 +106,15 @@ def load_asignados_aggregates():
             cells = row.get('values', [])
             if not cells or 'formattedValue' not in cells[0]: continue
             bg = cells[0].get('effectiveFormat', {}).get('backgroundColor', {})
-            # Si el fondo existe, los canales faltantes son 0. Si no existe, es blanco (1,1,1)
-            r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
             if not bg: r = g = b = 1.0
-            
-            if abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 # #efefef
-            elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1 # #d9d9d9
+            else:
+                r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+            if abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02: p_realizar += 1 
+            elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1 
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Corregido Motor de Color)
+# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -112,40 +124,31 @@ def get_today_ruta():
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        
         variantes_hoy = get_fecha_variantes_vzla()
         dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
-        
         found_today, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
             if not cells or len(cells) < 13: continue
             val_j = cells[9].get('formattedValue', '').lower().strip()
             val_h = cells[7].get('formattedValue', '').strip()
-            
             if any(v in val_j for v in variantes_hoy) and not val_h:
                 found_today = True
                 continue
-            
             if found_today:
                 if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
                         bg = cells[9].get('effectiveFormat', {}).get('backgroundColor', {})
-                        # Lógica de color robusta
                         if not bg: r = g = b = 1.0
                         else:
-                            r = bg.get('red', 0.0)
-                            g = bg.get('green', 0.0)
-                            b = bg.get('blue', 0.0)
-                        
+                            r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
                         color_key = "white"
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.85) < 0.05 and abs(g-0.85) < 0.05: color_key = "grey"
                         elif r > 0.8 and g < 0.5 and b < 0.5: color_key = "red"
-                        
-                        clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip(), 'tipo': tipo, 'color': color_key})
+                        clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
     except: return []
@@ -177,11 +180,16 @@ try:
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 3: CONTROL DE RUTA ---
+    # --- SECCIÓN 3: CONTROL DE RUTA (LÍNEA ÚNICA) ---
     st.markdown("<div class='section-title'>Control de Ruta - Clientes de Hoy</div>", unsafe_allow_html=True)
     c_ruta, c_act, c_ade, c_dev = st.columns(4)
-    def render_cliente(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre'][:15]}<br>{c['zona']} ({c['tipo']})</div>"
-    with c_ruta: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_cliente(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
+    
+    # Función de renderizado en una sola línea
+    def render_cliente(c): 
+        return f"<div class='cliente-item bg-{c['color']}' title='{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})'>{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
+    
+    with c_ruta:
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_cliente(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
     with c_act:
         act = [c for c in ruta_hoy if c['color'] == 'green']
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>ACTIVADOS</span><span>TOTAL: {len(act)}</span></div>{''.join([render_cliente(c) for c in act])}</div>", unsafe_allow_html=True)
