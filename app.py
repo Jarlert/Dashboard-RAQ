@@ -21,12 +21,11 @@ ayer_vzla = hoy_vzla - timedelta(days=1)
 def get_fecha_variantes_vzla():
     dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     nombre_dia = dias[ahora_vzla.weekday()]
-    # Variantes para martes 28/04/26 y martes 28/4/26
     v1 = f"{nombre_dia} {ahora_vzla.strftime('%d/%m/%y')}"
     v2 = f"{nombre_dia} {ahora_vzla.day}/{ahora_vzla.month}/{ahora_vzla.strftime('%y')}"
     return [v1.lower(), v2.lower()]
 
-# 2. ESTILO CSS DARK PREMIUM (Simetría total 110px)
+# 2. ESTILO CSS DARK PREMIUM
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -56,7 +55,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO - Recupera los 237 de febrero y 280 de marzo)
+# 3. MOTOR DE CARGA (CONGELADO - Registros de Febrero y Marzo Protegidos)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -100,7 +99,7 @@ def load_asignados_aggregates():
         return p_realizar, p_adecuacion
     except: return 0, 0
 
-# 5. MOTOR RUTA HOY (Hoja 99+ RUTAS PRE PLANIFICADAS - Detallado)
+# 5. MOTOR RUTA HOY (Hoja RUTAS PRE PLANIFICADAS - Corregida)
 @st.cache_data(ttl=30)
 def get_today_ruta():
     try:
@@ -108,7 +107,7 @@ def get_today_ruta():
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        # Leemos la hoja correcta
+        # Nombre de hoja corregido a "RUTAS PRE PLANIFICADAS"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
@@ -119,36 +118,39 @@ def get_today_ruta():
         for row in rows:
             cells = row.get('values', [])
             if not cells or len(cells) < 13: continue
-            
-            # Columna J (Indice 9) -> Nombre / Fecha
             val_j = cells[9].get('formattedValue', '').lower().strip()
-            # Columna H (Indice 7) -> Contrato
             val_h = cells[7].get('formattedValue', '').strip()
             
-            # Detectar encabezado de hoy
             if any(v in val_j for v in variantes_hoy) and not val_h:
                 found_today = True
                 continue
             
             if found_today:
-                # Parar si encontramos otra fecha
                 if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h:
                     break
                 
-                # Extraer si hay contrato en H
                 if val_h and len(val_j) > 2:
                     try:
-                        serial_val = cells[4].get('formattedValue', '').lower() # Col E
-                        zona = cells[12].get('formattedValue', '').strip() # Col M
+                        serial_val = cells[4].get('formattedValue', '').lower()
+                        zona = cells[12].get('formattedValue', '').strip()
                         tipo = "M" if "mudanza" in serial_val else "N"
                         
+                        # Lógica de color mejorada para detectar VERDE
                         bg = cells[9].get('effectiveFormat', {}).get('backgroundColor', {})
-                        r, g, b = bg.get('red', 1.0), bg.get('green', 1.0), bg.get('blue', 1.0)
+                        r = bg.get('red', 1.0)
+                        g = bg.get('green', 1.0)
+                        b = bg.get('blue', 1.0)
                         
                         color_key = "white"
-                        if r < 0.4 and g > 0.8 and b < 0.4: color_key = "green"
-                        elif abs(r-0.85) < 0.05: color_key = "grey"
-                        elif r > 0.8 and g < 0.4 and b < 0.4: color_key = "red"
+                        # Si el Verde es predominante y alto, es ACTIVADO
+                        if g > r and g > b and g > 0.5: 
+                            color_key = "green"
+                        # Si es gris
+                        elif abs(r-0.85) < 0.1 and abs(g-0.85) < 0.1: 
+                            color_key = "grey"
+                        # Si es rojo
+                        elif r > g and r > b and r > 0.5: 
+                            color_key = "red"
                         
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': zona, 'tipo': tipo, 'color': color_key})
                     except: continue
@@ -170,7 +172,7 @@ try:
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Vzla: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- RENDIMIENTO ---
+    # --- SECCIÓN 1: RENDIMIENTO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -178,13 +180,13 @@ try:
     with k3: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_actual) & (df['Fecha_Limpia'] <= fin_sem_actual)])}</div><div class='m-sub'>{inicio_sem_actual.strftime('%d/%m')} al {fin_sem_actual.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4: st.markdown(f"<div class='metric-container'><div class='m-label'>Semana Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= inicio_sem_pasada) & (df['Fecha_Limpia'] <= fin_sem_pasada)])}</div><div class='m-sub'>{inicio_sem_pasada.strftime('%d/%m')} al {fin_sem_pasada.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
 
-    # --- ESTADO ASIGNACIONES ---
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES (Subtítulos de color eliminados) ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div><div class='m-sub'>Color #efefef</div></div>", unsafe_allow_html=True)
-    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div><div class='m-sub'>Color #d9d9d9</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
 
-    # --- CONTROL DE RUTA ---
+    # --- SECCIÓN 3: CONTROL DE RUTA ---
     st.markdown("<div class='section-title'>Control de Ruta - Clientes de Hoy</div>", unsafe_allow_html=True)
     c_ruta, c_act, c_ade, c_dev = st.columns(4)
     def render_cliente(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre'][:15]}<br>{c['zona']} ({c['tipo']})</div>"
@@ -199,14 +201,14 @@ try:
         dev = [c for c in ruta_hoy if c['color'] == 'red']
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>DEVUELTOS</span><span>TOTAL: {len(dev)}</span></div>{''.join([render_cliente(c) for c in dev])}</div>", unsafe_allow_html=True)
 
-    # --- EFICIENCIA ---
+    # --- SECCIÓN 4: EFICIENCIA ---
     st.markdown("<div class='section-title'>Eficiencia de Materiales</div>", unsafe_allow_html=True)
     e1, e2 = st.columns(2)
     t_inst = len(df) if len(df) > 0 else 1
     with e1: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Metros</div><div class='m-value'>{df['Metraje'].sum()/t_inst:.2f}</div></div>", unsafe_allow_html=True)
     with e2: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Tensores</div><div class='m-value'>{df['Tensores'].sum()/t_inst:.2f}</div></div>", unsafe_allow_html=True)
 
-    # --- PRODUCTIVIDAD ---
+    # --- SECCIÓN 5: PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
@@ -214,7 +216,7 @@ try:
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
     st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
-    # --- HISTORIAL ---
+    # --- SECCIÓN 6: HISTORIAL ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
     with col_h1:
