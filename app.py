@@ -94,7 +94,7 @@ def load_asignados_aggregates():
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!B:B"], includeGridData=True).execute()
+        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!B:B"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         p_realizar, p_adecuacion = 0, 0
         for row in rows:
