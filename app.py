@@ -74,7 +74,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO SEGÚN REGLA - Protegiendo Febrero/Marzo)
+# 3. MOTOR DE CARGA (CONGELADO - Protegiendo Febrero/Marzo)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -99,7 +99,7 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS (Motor corregido para buscar "ASIGNACIÓN RAQ [Fecha]")
+# 4. AGREGADOS ASIGNADOS (Motor corregido con parada de seguridad)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -107,43 +107,45 @@ def load_asignados_aggregates():
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
-        p_realizar, p_adecuacion = 0, 0
-        asig_hoy, asig_ayer = 0, 0
-        
-        # Buscamos "ASIGNACIÓN RAQ 11/05/2026"
+        p_realizar, p_adecuacion, asig_hoy, asig_ayer = 0, 0, 0, 0
         target_hoy = f"asignación raq {ahora_vzla.strftime('%d/%m/%Y')}"
         target_ayer = f"asignación raq {ayer_laboral_dt.strftime('%d/%m/%Y')}"
-
         current_block = None
         
         for row in rows:
             cells = row.get('values', [])
-            if not cells or len(cells) < 7: continue
+            if not cells: continue
             
-            # Texto en Columna G (Indice 6)
-            g_text = cells[6].get('formattedValue', '').lower().strip()
+            g_text = cells[6].get('formattedValue', '').lower().strip() if len(cells) > 6 else ""
             
-            # Detectar si entramos en un bloque de fecha
+            # Detectar cambio de bloque (Encabezado Naranja)
             if "asignación raq" in g_text:
                 if target_hoy in g_text: current_block = "hoy"
                 elif target_ayer in g_text: current_block = "ayer"
                 else: current_block = None
                 continue
             
-            # Si estamos dentro de un bloque, contamos si la fila tiene color
+            # Si estamos en un bloque, validamos si la fila tiene datos reales
             if current_block:
+                # Si la celda de contrato (E) y plan (B) están vacías, asumimos fin de lista
+                has_content = len(cells) > 4 and (cells[4].get('formattedValue') or cells[1].get('formattedValue'))
+                if not has_content:
+                    current_block = None
+                    continue
+                
+                # Verificamos si tiene color en Col B(1)
                 bg = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
-                # Si el fondo no es blanco puro (1,1,1), es un cliente
-                if bg and not (bg.get('red', 1.0) == 1.0 and bg.get('green', 1.0) == 1.0 and bg.get('blue', 1.0) == 1.0):
+                is_white = not bg or (bg.get('red', 1.0) == 1.0 and bg.get('green', 1.0) == 1.0 and bg.get('blue', 1.0) == 1.0)
+                
+                if not is_white:
                     if current_block == "hoy": asig_hoy += 1
                     if current_block == "ayer": asig_ayer += 1
 
-            # Conteo General de Estados (Toda la hoja - Basado en Col B)
-            if 'userEnteredValue' in cells[1]:
+            # Conteo General de Estados (Basado en Col B)
+            if len(cells) > 1 and 'userEnteredValue' in cells[1]:
                 bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
                 r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
                 if not bg_gen: r = g = b = 1.0
@@ -192,10 +194,8 @@ try:
     df = load_data()
     agg_realizar, agg_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
-    
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
-
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -209,12 +209,10 @@ try:
         st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
-
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
-
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
     c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
@@ -226,14 +224,12 @@ try:
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ff00ff;'></div><span>Pendiente (Magenta)</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente (Blanco)</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
-
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
     tech_counts.columns = ['Técnico', 'Servicios']
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
     st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
-
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
     with col_h1:
