@@ -32,6 +32,7 @@ vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
 
+# Lógica Ayer Laboral (Viernes si hoy es Lunes)
 if ahora_vzla.weekday() == 0:
     ayer_laboral_dt = ahora_vzla - timedelta(days=3)
 else:
@@ -60,10 +61,6 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    @media (max-width: 768px) {
-        .metric-container { height: 90px !important; }
-        .m-value { font-size: 18px !important; }
-    }
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
@@ -71,6 +68,7 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
+    .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
@@ -102,59 +100,84 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS (Motor de conteo corregido para llegar a 14)
+# 4. MOTOR PARA DATOS DE HOJA "ASIGNADOS" (KPIs y Lista Ayer)
 @st.cache_data(ttl=30)
-def load_asignados_aggregates():
+def get_asignados_data(fecha_dt):
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
+        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:M"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
-        p_realizar, p_adecuacion = 0, 0
-        asig_hoy, asig_ayer = 0, 0
-        v_hoy = get_fecha_variantes(ahora_vzla)
-        v_ayer = get_fecha_variantes(ayer_laboral_dt)
-        f_h, f_a = False, False
-        
+        target_str = f"asignación raq {fecha_dt.strftime('%d/%m/%Y')}"
+        found_block = False
+        count = 0
+        clients = []
+
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
             
-            f_val = cells[6].get('formattedValue', '').lower().strip() if len(cells) > 6 else ""
+            g_val = cells[6].get('formattedValue', '').lower().strip() if len(cells) > 6 else ""
             
-            # Detectar cabeceras de fecha
-            if any(v in f_val for v in v_hoy): f_h = True; f_a = False; continue
-            if any(v in f_val for v in v_ayer): f_a = True; f_h = False; continue
+            if "asignación raq" in g_val:
+                if target_str in g_val: found_block = True
+                else: found_block = False
+                continue
             
-            # Si estamos en un bloque, contamos si hay un contrato escrito (Col E)
-            if f_h or f_a:
-                if "/" in f_val and any(d in f_val for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]):
-                    f_h = f_a = False
-                    continue
-                
-                # Si tiene contrato en Col E(4), lo contamos
-                has_contract = len(cells) > 4 and cells[4].get('formattedValue', '').strip() != ""
-                if has_contract:
-                    if f_h: asig_hoy += 1
-                    if f_a: asig_ayer += 1
-            
-            # Conteo General de Estados (Basado en Col B)
-            if len(cells) > 1 and 'userEnteredValue' in cells[1]:
-                bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
-                r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
-                if not bg_gen: r = g = b = 1.0
-                if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
-                elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
-                
-        return p_realizar, p_adecuacion, asig_hoy, asig_ayer
-    except: return 0, 0, 0, 0
+            if found_block:
+                # Si la fila tiene contrato (E), la procesamos
+                val_h = cells[4].get('formattedValue', '').strip() if len(cells) > 4 else ""
+                if val_h:
+                    count += 1
+                    # Extraer para la lista
+                    nombre = cells[8].get('formattedValue', '').upper() if len(cells) > 8 else "SIN NOMBRE"
+                    zona = cells[11].get('formattedValue', '').upper() if len(cells) > 11 else "SIN ZONA"
+                    mudanza = cells[2].get('formattedValue', '').lower() if len(cells) > 2 else ""
+                    tipo = "M" if "mudanza" in mudanza else "N"
+                    
+                    bg = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
+                    if not bg: r = g = b = 1.0
+                    else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+                    
+                    color_key = "white"
+                    if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
+                    elif abs(r-0.851) < 0.05: color_key = "grey"
+                    elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
+                    
+                    clients.append({'contrato': val_h, 'nombre': nombre, 'zona': zona, 'tipo': tipo, 'color': color_key})
+                elif len(cells) > 1 and not cells[1].get('formattedValue'): # Fila vacía corta el bloque
+                    found_block = False
+        return count, clients
+    except: return 0, []
 
-# 5. MOTOR RUTA POR FECHA
+# 5. AGREGADOS GENERALES (Pendientes y Adecuación)
 @st.cache_data(ttl=30)
-def get_ruta_by_date(fecha_dt):
+def load_general_aggregates():
+    try:
+        creds_info = st.secrets["connections"]["gsheets"]
+        creds = service_account.Credentials.from_service_account_info(creds_info)
+        service = build('sheets', 'v4', credentials=creds)
+        spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
+        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!B:B"], includeGridData=True).execute()
+        rows = result['sheets'][0]['data'][0].get('rowData', [])
+        p_realizar, p_adecuacion = 0, 0
+        for row in rows:
+            cells = row.get('values', [])
+            if not cells or 'userEnteredValue' not in cells[0]: continue
+            bg = cells[0].get('effectiveFormat', {}).get('backgroundColor', {})
+            if not bg: r = g = b = 1.0
+            else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+            if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
+            elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
+        return p_realizar, p_adecuacion
+    except: return 0, 0
+
+# 6. MOTOR RUTA HOY (RUTAS PRE PLANIFICADAS)
+@st.cache_data(ttl=30)
+def get_ruta_hoy():
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -162,7 +185,8 @@ def get_ruta_by_date(fecha_dt):
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        variantes = get_fecha_variantes(fecha_dt)
+        variantes = get_fecha_variantes(ahora_vzla)
+        dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
         found, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
@@ -170,7 +194,7 @@ def get_ruta_by_date(fecha_dt):
             val_j, val_h = cells[9].get('formattedValue', '').lower().strip(), cells[7].get('formattedValue', '').strip()
             if any(v in val_j for v in variantes) and not val_h: found = True; continue
             if found:
-                if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h: break
+                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
@@ -181,7 +205,6 @@ def get_ruta_by_date(fecha_dt):
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.851) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
-                        # Magenta se muestra como blanco en el dashboard por petición
                         elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "white"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
@@ -190,8 +213,10 @@ def get_ruta_by_date(fecha_dt):
 
 try:
     df = load_data()
-    agg_realizar, agg_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
-    ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
+    p_realizar, p_adecuacion = load_general_aggregates()
+    count_hoy, ruta_hoy = get_asignados_data(ahora_vzla)
+    count_ayer, ruta_ayer = get_asignados_data(ayer_laboral_dt)
+    ruta_hoy_planificada = get_ruta_hoy()
     
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
@@ -207,19 +232,19 @@ try:
     with k4:
         i_p = get_jueves(hoy_vzla) - timedelta(days=7); f_p = i_p + timedelta(days=6)
         st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
-    with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
-    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
+    with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{count_hoy}</div></div>", unsafe_allow_html=True)
+    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{count_ayer}</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
-    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{p_realizar}</div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
     c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
-    def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
-    with c_hoy: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA HOY</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
-    with c_ayer: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer_lab)}</span></div>{''.join([render_c(c) for c in ruta_ayer_lab])}</div>", unsafe_allow_html=True)
+    def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
+    with c_hoy: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA HOY</span><span>TOTAL: {len(ruta_hoy_planificada)}</span></div>{''.join([render_c(c) for c in ruta_hoy_planificada])}</div>", unsafe_allow_html=True)
+    with c_ayer: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer)}</span></div>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
     with c_mat:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
         items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
