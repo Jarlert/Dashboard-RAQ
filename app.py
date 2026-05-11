@@ -11,7 +11,7 @@ from google.oauth2 import service_account
 # 1. CONFIGURACIÓN Y AUTO-REFRESCO
 st.set_page_config(page_title="FIBRA RAQ | Pro Dashboard", layout="wide")
 
-# --- GATE DE SEGURIDAD (PASSWORD) ---
+# --- GATE DE SEGURIDAD ---
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
@@ -20,14 +20,11 @@ if not st.session_state['authenticated']:
     col_auth_1, col_auth_2, col_auth_3 = st.columns([1,1,1])
     with col_auth_2:
         password = st.text_input("Introduce la clave maestra:", type="password")
-        if password == "RAQ2026": # <--- CAMBIA TU CLAVE AQUÍ
+        if password == "RAQ2026":
             st.session_state['authenticated'] = True
             st.rerun()
-        elif password != "":
-            st.error("Clave incorrecta")
     st.stop()
 
-# Si llega aquí, está autenticado
 st_autorefresh(interval=60000, key="datarefresh")
 
 # --- CONFIGURACIÓN HORA VENEZUELA ---
@@ -35,6 +32,7 @@ vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
 
+# Lógica Ayer Laboral (Viernes si hoy es Lunes)
 if ahora_vzla.weekday() == 0:
     ayer_laboral_dt = ahora_vzla - timedelta(days=3)
 else:
@@ -46,7 +44,8 @@ def get_fecha_variantes(dt_obj):
     nombre_dia = dias[dt_obj.weekday()]
     v1 = f"{nombre_dia} {dt_obj.strftime('%d/%m/%y')}"
     v2 = f"{nombre_dia} {dt_obj.day}/{dt_obj.month}/{dt_obj.strftime('%y')}"
-    return [v1.lower(), v2.lower()]
+    v3 = dt_obj.strftime('%d/%m/%Y') # Formato puro 11/05/2026
+    return [v1.lower(), v2.lower(), v3.lower()]
 
 # 2. ESTILO CSS DARK PREMIUM + RESPONSIVE
 st.markdown("""
@@ -55,7 +54,6 @@ st.markdown("""
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
     
-    /* Tarjetas Estándar */
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -63,15 +61,11 @@ st.markdown("""
     }
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
-    .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; }
+    .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
 
-    /* AJUSTES PARA MÓVIL (Responsive) */
     @media (max-width: 768px) {
-        .metric-container { height: 80px !important; padding: 5px !important; margin-bottom: 5px; }
+        .metric-container { height: 90px !important; }
         .m-value { font-size: 18px !important; }
-        .m-label { font-size: 8px !important; }
-        .section-title { font-size: 15px !important; }
-        .m-sub { font-size: 7px !important; }
     }
     
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
@@ -80,7 +74,7 @@ st.markdown("""
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #b7b7b7; color: #000 !important; }
+    .bg-grey { background-color: #d9d9d9; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     
@@ -116,7 +110,7 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS
+# 4. AGREGADOS ASIGNADOS (Motor corregido para Col G y Col E)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -124,21 +118,42 @@ def load_asignados_aggregates():
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!B:B"], includeGridData=True).execute()
+        
+        # Leemos columnas E(4), G(6) y B(1) para colores
+        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
+        
         p_realizar, p_adecuacion = 0, 0
+        asig_hoy, asig_ayer = 0, 0
+        
+        v_hoy = get_fecha_variantes(ahora_vzla)
+        v_ayer = get_fecha_variantes(ayer_laboral_dt)
+
         for row in rows:
             cells = row.get('values', [])
-            if not cells or 'formattedValue' not in cells[0]: continue
-            bg = cells[0].get('effectiveFormat', {}).get('backgroundColor', {})
-            if not bg: r = g = b = 1.0
-            else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
-            is_magenta = (r > 0.9 and g < 0.1 and b > 0.9)
-            is_light_grey = (abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02)
-            if is_light_grey or is_magenta: p_realizar += 1 
-            elif abs(r-0.717) < 0.03 and abs(g-0.717) < 0.03: p_adecuacion += 1 
-        return p_realizar, p_adecuacion
-    except: return 0, 0
+            if not cells or len(cells) < 7: continue
+            
+            # 1. Lógica de Asignados (Col G: Fecha, Col E: Contrato)
+            fecha_celda = cells[6].get('formattedValue', '').lower().strip()
+            contrato_celda = cells[4].get('formattedValue', '').strip()
+            
+            if contrato_celda:
+                if any(v in fecha_celda for v in v_hoy): asig_hoy += 1
+                if any(v in fecha_celda for v in v_ayer): asig_ayer += 1
+
+            # 2. Lógica de Estados por Color (Basado en Col B)
+            if 'userEnteredValue' in cells[1]:
+                bg = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
+                if not bg: r = g = b = 1.0
+                else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
+                
+                # #efefef o #ff00ff -> Pendientes
+                if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
+                # #d9d9d9 -> Adecuación
+                elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1
+                
+        return p_realizar, p_adecuacion, asig_hoy, asig_ayer
+    except: return 0, 0, 0, 0
 
 # 5. MOTOR RUTA POR FECHA
 @st.cache_data(ttl=30)
@@ -158,8 +173,7 @@ def get_ruta_by_date(fecha_dt):
             if not cells or len(cells) < 13: continue
             val_j = cells[9].get('formattedValue', '').lower().strip()
             val_h = cells[7].get('formattedValue', '').strip()
-            if any(v in val_j for v in variantes) and not val_h:
-                found = True; continue
+            if any(v in val_j for v in variantes) and not val_h: found = True; continue
             if found:
                 if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
@@ -170,7 +184,7 @@ def get_ruta_by_date(fecha_dt):
                         else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
                         color_key = "white"
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
-                        elif abs(r-0.717) < 0.05 and abs(g-0.717) < 0.05: color_key = "grey"
+                        elif abs(r-0.851) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
                         elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "magenta"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
@@ -180,15 +194,15 @@ def get_ruta_by_date(fecha_dt):
 
 try:
     df = load_data()
-    agg_realizar, agg_adecuacion = load_asignados_aggregates()
+    agg_realizar, agg_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy = get_ruta_by_date(ahora_vzla)
     ruta_ayer_lab = get_ruta_by_date(ayer_laboral_dt)
     
     # --- HEADER ---
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>Reloj Vzla: {ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO (6 KPIs) ---
+    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -196,12 +210,12 @@ try:
     with k3:
         def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
         i_s = get_jueves(hoy_vzla); f_s = i_s + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div><div class='m-sub'>{i_s.strftime('%d/%m')} al {f_s.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4:
         i_p = get_jueves(hoy_vzla) - timedelta(days=7); f_p = i_p + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
-    with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{len(ruta_hoy)}</div></div>", unsafe_allow_html=True)
-    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer</div><div class='m-value'>{len(ruta_ayer_lab)}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+    with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
+    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Viernes</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
@@ -225,7 +239,7 @@ try:
             <div class='ruta-box' style='height:380px;'>
                 <div class='ruta-header'>LEYENDA</div>
                 <div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div>
-                <div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div>
+                <div class='legend-item'><div class='legend-color' style='background:#d9d9d9;'></div><span>Adecuación / Caja</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#ff00ff;'></div><span>Pendiente (Magenta)</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente (Blanco)</span></div>
