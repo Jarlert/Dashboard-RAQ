@@ -44,10 +44,10 @@ def get_fecha_variantes(dt_obj):
     nombre_dia = dias[dt_obj.weekday()]
     v1 = f"{nombre_dia} {dt_obj.strftime('%d/%m/%y')}"
     v2 = f"{nombre_dia} {dt_obj.day}/{dt_obj.month}/{dt_obj.strftime('%y')}"
-    v3 = dt_obj.strftime('%d/%m/%Y') # Formato puro 11/05/2026
+    v3 = dt_obj.strftime('%d/%m/%Y')
     return [v1.lower(), v2.lower(), v3.lower()]
 
-# 2. ESTILO CSS DARK PREMIUM + RESPONSIVE
+# 2. ESTILO CSS DARK PREMIUM
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -63,18 +63,17 @@ st.markdown("""
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
 
-    @media (max-width: 768px) {
-        .metric-container { height: 90px !important; }
-        .m-value { font-size: 18px !important; }
-    }
-    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
-    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
+    .cliente-item { 
+        font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; 
+        color: #000 !important; font-weight: 600; white-space: nowrap; 
+        overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1);
+    }
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #d9d9d9; color: #000 !important; }
+    .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     
@@ -110,7 +109,7 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS (Motor corregido para Col G y Col E)
+# 4. AGREGADOS ASIGNADOS (Corregido para conteos reales y colores)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -119,7 +118,7 @@ def load_asignados_aggregates():
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         
-        # Leemos columnas E(4), G(6) y B(1) para colores
+        # Rango amplio para asegurar capturar todas las filas nuevas
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         
@@ -133,24 +132,22 @@ def load_asignados_aggregates():
             cells = row.get('values', [])
             if not cells or len(cells) < 7: continue
             
-            # 1. Lógica de Asignados (Col G: Fecha, Col E: Contrato)
-            fecha_celda = cells[6].get('formattedValue', '').lower().strip()
-            contrato_celda = cells[4].get('formattedValue', '').strip()
+            f_celda = cells[6].get('formattedValue', '').lower().strip()
+            c_celda = cells[4].get('formattedValue', '').strip()
             
-            if contrato_celda:
-                if any(v in fecha_celda for v in v_hoy): asig_hoy += 1
-                if any(v in fecha_celda for v in v_ayer): asig_ayer += 1
+            # Conteo de Asignaciones (Col G y Col E)
+            if c_celda:
+                if any(v in f_celda for v in v_hoy): asig_hoy += 1
+                if any(v in f_celda for v in v_ayer): asig_ayer += 1
 
-            # 2. Lógica de Estados por Color (Basado en Col B)
+            # Conteo de Estados por Color (Basado en Col B)
             if 'userEnteredValue' in cells[1]:
                 bg = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
+                r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
                 if not bg: r = g = b = 1.0
-                else: r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
                 
-                # #efefef o #ff00ff -> Pendientes
                 if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
-                # #d9d9d9 -> Adecuación
-                elif abs(r-0.851) < 0.02 and abs(g-0.851) < 0.02: p_adecuacion += 1
+                elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
                 
         return p_realizar, p_adecuacion, asig_hoy, asig_ayer
     except: return 0, 0, 0, 0
@@ -173,7 +170,8 @@ def get_ruta_by_date(fecha_dt):
             if not cells or len(cells) < 13: continue
             val_j = cells[9].get('formattedValue', '').lower().strip()
             val_h = cells[7].get('formattedValue', '').strip()
-            if any(v in val_j for v in variantes) and not val_h: found = True; continue
+            if any(v in val_j for v in variantes) and not val_h:
+                found = True; continue
             if found:
                 if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
@@ -215,7 +213,7 @@ try:
         i_p = get_jueves(hoy_vzla) - timedelta(days=7); f_p = i_p + timedelta(days=6)
         st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
-    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Viernes</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
+    with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
 
     # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
@@ -232,14 +230,14 @@ try:
     with c_ayer: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer_lab)}</span></div>{''.join([render_c(c) for c in ruta_ayer_lab])}</div>", unsafe_allow_html=True)
     with c_mat:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
-        items_mat = "".join([f"<div class='cliente-item bg-green'>{r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
+        items_mat = "".join([f"<div class='cliente-item bg-green'>{r['Contrato']} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""
             <div class='ruta-box' style='height:380px;'>
                 <div class='ruta-header'>LEYENDA</div>
                 <div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div>
-                <div class='legend-item'><div class='legend-color' style='background:#d9d9d9;'></div><span>Adecuación / Caja</span></div>
+                <div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#ff00ff;'></div><span>Pendiente (Magenta)</span></div>
                 <div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente (Blanco)</span></div>
