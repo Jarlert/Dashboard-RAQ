@@ -61,24 +61,17 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
-    
-    .cliente-item { 
-        font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; 
-        font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); 
-    }
-    
+    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
-    
+    .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
-    .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -107,7 +100,7 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS (KPIs desde hoja "ASIGNADOS")
+# 4. AGREGADOS ASIGNADOS (Motor para KPIs de la hoja "ASIGNADOS")
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -117,33 +110,46 @@ def load_asignados_aggregates():
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        p_realizar, p_adecuacion, asig_hoy, asig_ayer = 0, 0, 0, 0
-        v_hoy = get_fecha_variantes(ahora_vzla)
-        v_ayer = get_fecha_variantes(ayer_laboral_dt)
-        f_h, f_a = False, False
+        
+        p_realizar, p_adecuacion = 0, 0
+        asig_hoy, asig_ayer = 0, 0
+        
+        target_hoy = f"asignación raq {ahora_vzla.strftime('%d/%m/%Y')}"
+        target_ayer = f"asignación raq {ayer_laboral_dt.strftime('%d/%m/%Y')}"
+        current_block = None
+        
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
-            f_val = cells[6].get('formattedValue', '').lower().strip() if len(cells) > 6 else ""
-            if any(v in f_val for v in v_hoy): f_h = True; f_a = False; continue
-            if any(v in f_val for v in v_ayer): f_a = True; f_h = False; continue
-            if f_h or f_a:
-                if "/" in f_val and any(d in f_val for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]):
-                    f_h = f_a = False; continue
-                has_contract = len(cells) > 4 and cells[4].get('formattedValue', '').strip() != ""
-                if has_contract:
-                    if f_h: asig_hoy += 1
-                    if f_a: asig_ayer += 1
+            g_text = cells[6].get('formattedValue', '').lower().strip() if len(cells) > 6 else ""
+            
+            if "asignación raq" in g_text:
+                if target_hoy in g_text: current_block = "hoy"
+                elif target_ayer in g_text: current_block = "ayer"
+                else: current_block = None
+                continue
+            
+            if current_block:
+                # Si la fila tiene contrato (E), la contamos
+                val_e = cells[4].get('formattedValue', '').strip() if len(cells) > 4 else ""
+                if val_e:
+                    if current_block == "hoy": asig_hoy += 1
+                    if current_block == "ayer": asig_ayer += 1
+                elif len(cells) > 1 and not cells[1].get('formattedValue'):
+                    current_block = None # Fin de bloque
+
+            # Conteo General de Estados (Basado en Col B)
             if len(cells) > 1 and 'userEnteredValue' in cells[1]:
                 bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
                 r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
                 if not bg_gen: r = g = b = 1.0
                 if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
                 elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
+                
         return p_realizar, p_adecuacion, asig_hoy, asig_ayer
     except: return 0, 0, 0, 0
 
-# 5. MOTOR RUTA POR FECHA (Desde hoja "RUTAS PRE PLANIFICADAS")
+# 5. MOTOR RUTA POR FECHA (Mantenida lógica perfecta de hoja RUTAS PRE PLANIFICADAS)
 @st.cache_data(ttl=30)
 def get_ruta_by_date(fecha_dt):
     try:
@@ -154,6 +160,7 @@ def get_ruta_by_date(fecha_dt):
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         variantes = get_fecha_variantes(fecha_dt)
+        dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
         found, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
@@ -180,12 +187,13 @@ def get_ruta_by_date(fecha_dt):
 
 try:
     df = load_data()
-    p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
+    agg_realizar, agg_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
+    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -200,11 +208,13 @@ try:
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
 
+    # --- SECCIÓN 2: ESTADO ASIGNACIONES ---
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
-    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{p_realizar}</div></div>", unsafe_allow_html=True)
-    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
+    with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
+    with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
 
+    # --- SECCIÓN 3: CONTROL DE RUTA ---
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
     c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
@@ -217,6 +227,7 @@ try:
     with c_leg:
         st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
 
+    # --- PRODUCTIVIDAD ---
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
     tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
@@ -224,6 +235,7 @@ try:
     tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
     st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
+    # --- HISTORIAL ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
     with col_h1:
