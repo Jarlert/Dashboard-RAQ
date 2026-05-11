@@ -46,7 +46,7 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { 
@@ -59,7 +59,7 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    .bg-magenta { background-color: #ff00ff; color: #ffffff !important; } /* Nuevo Magenta */
+    .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
@@ -94,7 +94,7 @@ def load_data():
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
     return df
 
-# 4. AGREGADOS ASIGNADOS (Actualizado para incluir #ff00ff)
+# 4. AGREGADOS ASIGNADOS (Incluye #ff00ff)
 @st.cache_data(ttl=30)
 def load_asignados_aggregates():
     try:
@@ -112,15 +112,10 @@ def load_asignados_aggregates():
             if not bg: r = g = b = 1.0
             else:
                 r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
-            
-            # Detección de #efefef (Gris muy claro) O #ff00ff (Magenta)
             is_magenta = (r > 0.9 and g < 0.1 and b > 0.9)
             is_light_grey = (abs(r-0.937) < 0.02 and abs(g-0.937) < 0.02)
-            
-            if is_light_grey or is_magenta: 
-                p_realizar += 1 
-            elif abs(r-0.717) < 0.03 and abs(g-0.717) < 0.03: 
-                p_adecuacion += 1 
+            if is_light_grey or is_magenta: p_realizar += 1 
+            elif abs(r-0.717) < 0.03 and abs(g-0.717) < 0.03: p_adecuacion += 1 
         return p_realizar, p_adecuacion
     except: return 0, 0
 
@@ -153,13 +148,11 @@ def get_ruta_by_date(fecha_dt):
                         if not bg: r = g = b = 1.0
                         else:
                             r, g, b = bg.get('red', 0.0), bg.get('green', 0.0), bg.get('blue', 0.0)
-                        
                         color_key = "white"
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.717) < 0.05 and abs(g-0.717) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
-                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "magenta" # Detección Magenta
-                        
+                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "magenta"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
@@ -196,19 +189,19 @@ try:
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{agg_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{agg_adecuacion}</div></div>", unsafe_allow_html=True)
 
-    # --- SECCIÓN 3: CONTROL DE RUTA ---
+    # --- SECCIÓN 3: CONTROL DE RUTA (Marcos eliminados) ---
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
     c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{c['contrato']} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
 
     with c_hoy:
-        st.markdown(f"<div class='ruta-box' style='border: 2px solid #ff4d4d;'><div class='ruta-header'><span>RUTA HOY</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA HOY</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
     with c_ayer:
-        st.markdown(f"<div class='ruta-box' style='border: 2px solid #00d4ff;'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer)}</span></div>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer)}</span></div>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
     with c_mat:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
         items_mat = "".join([f"<div class='cliente-item bg-green'>{r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
-        st.markdown(f"<div class='ruta-box' style='border: 2px solid #00ff00;'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""
             <div class='ruta-box' style='height:380px;'>
