@@ -79,7 +79,16 @@ st.markdown("""
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
-    .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 12px; border-radius: 8px; margin-top: 15px; }
+    
+    /* Estilo corregido para el buscador */
+    .search-result-card { 
+        background: rgba(0, 212, 255, 0.1); 
+        border: 1px solid #00d4ff; 
+        padding: 15px; 
+        border-radius: 10px; 
+        margin-top: 10px;
+        font-family: 'Poppins', sans-serif;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -138,7 +147,6 @@ def load_asignados_aggregates():
                 bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
                 r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
                 if not bg_gen: r = g = b = 1.0
-                # Magenta y Gris claro cuentan como pendientes
                 if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
                 elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
         return p_realizar, p_adecuacion, asig_hoy, asig_ayer
@@ -155,7 +163,6 @@ def get_ruta_by_date(fecha_dt):
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         variantes = get_fecha_variantes(fecha_dt)
-        dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
         found, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
@@ -163,7 +170,7 @@ def get_ruta_by_date(fecha_dt):
             val_j, val_h = cells[9].get('formattedValue', '').lower().strip(), cells[7].get('formattedValue', '').strip()
             if any(v in val_j for v in variantes) and not val_h: found = True; continue
             if found:
-                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
+                if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
@@ -174,7 +181,6 @@ def get_ruta_by_date(fecha_dt):
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.851) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
-                        # Magenta se mapea a blanco (Pendiente) para el Dashboard
                         elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "white"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
@@ -227,23 +233,30 @@ try:
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
+    # --- SIDEBAR: BUSCADOR ---
     with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
             res = hybrid_search(search_query, df)
             if res:
-                st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
-                st.write(f"**CLIENTE:** {res['cliente']}")
+                # UNIFICADO EN UN SOLO BLOQUE PARA EVITAR CUADROS RAROS
                 if "INSTALADO" in res['status']:
-                    st.write(f"**FECHA:** {res['fecha']}")
-                    st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
-                else: st.write(f"**ZONA:** {res['zona']}")
-                st.markdown("</div>", unsafe_allow_html=True)
+                    info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA:</b> {res['fecha']}</p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>"
+                else:
+                    info_extra = f"<p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>"
+                
+                st.markdown(f"""
+                <div class='search-result-card'>
+                    <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                    <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
+                    {info_extra}
+                </div>
+                """, unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>")
+    # --- HEADER CORREGIDO ---
+    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
