@@ -56,10 +56,15 @@ st.markdown("""
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
         display: flex; flex-direction: column; justify-content: center; align-items: center;
+        margin-bottom: 10px;
     }
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
+    @media (max-width: 768px) {
+        .metric-container { height: 90px !important; }
+        .m-value { font-size: 18px !important; }
+    }
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
@@ -82,7 +87,6 @@ def load_data():
     creds = service_account.Credentials.from_service_account_info(creds_info)
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-    
     asig_data = service.spreadsheets().values().get(spreadsheetId=asig_id, range="ASIGNADOS!A:G").execute()
     rows_asig = asig_data.get('values', [])
     asig_map = {}
@@ -94,40 +98,31 @@ def load_data():
             try: current_date = pd.to_datetime(val_g.split(' ')[-1], dayfirst=True).date()
             except: pass
         contrato = str(row[4]).replace('.0', '').strip()
-        if contrato and current_date and contrato not in asig_map:
-            asig_map[contrato] = current_date
-
+        if contrato and current_date and contrato not in asig_map: asig_map[contrato] = current_date
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
-    
     def parse_individual_date(val):
         v = str(val).strip().lower()
         if not v or v == 'none': return None
         try:
-            if v.replace('.','').isdigit() and float(v) > 40000:
-                return pd.to_datetime(float(v), unit='D', origin='1899-12-30').date()
+            if v.replace('.','').isdigit() and float(v) > 40000: return pd.to_datetime(float(v), unit='D', origin='1899-12-30').date()
         except: pass
         for fmt in ('%d/%m/%Y', '%d/%m/%y', '%Y-%m-%d'):
             try: return datetime.strptime(v[:10], fmt).date()
             except: continue
         return pd.to_datetime(v, dayfirst=True, errors='coerce').date()
-
     df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
-    
-    # FIX PARA EL ERROR .dt: Convertimos a datetime antes de restar
     f_inst = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     f_asig = pd.to_datetime(df['Fecha_Asignacion'], errors='coerce')
     df['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
-
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df.columns if 'Serial ONU' in c or 'Serial' in c]
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
-    
     return df, asig_map
 
 # 4. AGREGADOS ASIGNADOS
@@ -264,18 +259,31 @@ try:
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    
+    # FILA 1: Conteos de Instalación
+    k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
     with k2: st.markdown(f"<div class='metric-container'><div class='m-label'>Ayer</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
     with k3:
         def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
         i_s = get_jueves(hoy_vzla); f_s = i_s + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div><div class='m-sub'>{i_s.strftime('%d/%m')} al {f_s.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val_sem = len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{val_sem}</div><div class='m-sub'>{i_s.strftime('%d/%m')} al {f_s.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4:
         i_p = get_jueves(hoy_vzla) - timedelta(days=7); f_p = i_p + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+        val_pas = len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{val_pas}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
+
+    # FILA 2: Asignaciones y Medias de Tiempo
+    k5, k6, k7, k8 = st.columns(4)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
+    with k7:
+        avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+    with k8:
+        avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
@@ -293,13 +301,6 @@ try:
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
-
-    st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
-    tech_cols = df.iloc[:, 22:25].values.flatten()
-    tech_counts = pd.Series(tech_cols).dropna().astype(str).str.strip().value_counts().reset_index()
-    tech_counts.columns = ['Técnico', 'Servicios']
-    tech_counts = tech_counts[~tech_counts['Técnico'].isin(["", "None", "nan", "0"])].head(12)
-    st.plotly_chart(px.bar(tech_counts, x='Servicios', y='Técnico', orientation='h', text_auto=True, color='Servicios', color_continuous_scale='Blues').update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white", height=400, margin=dict(l=0,r=0,t=0,b=0)), use_container_width=True)
 
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
