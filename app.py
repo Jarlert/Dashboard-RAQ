@@ -52,7 +52,6 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
-    
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -61,43 +60,40 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
-    @media (max-width: 768px) {
-        .metric-container { height: 90px !important; }
-        .m-value { font-size: 18px !important; }
-    }
-    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
-    
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    
-    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
-    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
-    
-    /* Estilo corregido para el buscador */
-    .search-result-card { 
-        background: rgba(0, 212, 255, 0.1); 
-        border: 1px solid #00d4ff; 
-        padding: 15px; 
-        border-radius: 10px; 
-        margin-top: 10px;
-        font-family: 'Poppins', sans-serif;
-    }
+    .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (CONGELADO - Protegiendo Febrero/Marzo)
+# 3. MOTOR DE CARGA (ACTUALIZADO CON CRUCE VIRTUAL DE ASIGNACIONES)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
+    
+    # --- PASO A: Obtener Mapa de Asignaciones (Virtual) ---
+    df_asig_raw = conn.read(worksheet="ASIGNADOS", ttl=0)
+    asig_map = {}
+    current_date = None
+    for _, row in df_asig_raw.iterrows():
+        val_g = str(row.iloc[6]).lower() # Columna G
+        if "asignación raq" in val_g:
+            try: current_date = pd.to_datetime(val_g.split(' ')[-1], dayfirst=True).date()
+            except: pass
+        contrato = str(row.iloc[4]).replace('.0', '').strip() # Columna E
+        if contrato and current_date and contrato not in asig_map:
+            asig_map[contrato] = current_date
+
+    # --- PASO B: Cargar Base Principal ---
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
+    
     def parse_individual_date(val):
         v = str(val).strip().lower()
         if not v or v == 'none': return None
@@ -109,17 +105,28 @@ def load_data():
             try: return datetime.strptime(v[:10], fmt).date()
             except: continue
         return pd.to_datetime(v, dayfirst=True, errors='coerce').date()
+
     df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
+    df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
+    
+    # --- PASO C: Cruce Virtual de Fechas ---
+    df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
+    # Calcular diferencia de días
+    df['Dias_Realizacion'] = (df['Fecha_Limpia'] - df['Fecha_Asignacion']).dt.days
+    # Si la diferencia es negativa (error de data) o nula, ponemos 0 o NaN
+    df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
+
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df.columns if 'Serial ONU' in c or 'Serial' in c]
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
-    return df
+    
+    return df, asig_map
 
 # 4. AGREGADOS ASIGNADOS
 @st.cache_data(ttl=30)
-def load_asignados_aggregates():
+def load_asignados_aggregates(asig_map):
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -187,15 +194,24 @@ def get_ruta_by_date(fecha_dt):
         return clientes
     except: return []
 
-# 6. MOTOR DE BÚSQUEDA HÍBRIDO
-def hybrid_search(query, df_installed):
+# 6. MOTOR DE BÚSQUEDA HÍBRIDO (Actualizado con Tiempo de Realización)
+def hybrid_search(query, df_installed, asig_map):
     query_clean = query.strip()
-    df_installed['Contrato_Str'] = df_installed['Contrato'].astype(str).str.replace('.0', '', regex=False)
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
+    
+    fecha_asig_dt = asig_map.get(query_clean)
+    fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if fecha_asig_dt else "N/A"
+
     if not match.empty:
         res = match.iloc[0]
-        f_fmt = res['Fecha_Limpia'].strftime('%d/%m/%y') if res['Fecha_Limpia'] else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha": f_fmt, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
+        f_inst_str = res['Fecha_Limpia'].strftime('%d/%m/%y')
+        dias = res['Dias_Realizacion']
+        return {
+            "status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], 
+            "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": dias,
+            "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']
+        }
+    
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -219,44 +235,39 @@ def hybrid_search(query, df_installed):
                     if "adecuaci" in motivo.lower():
                         trabajo = cells[18].get('formattedValue', 'N/A').strip() if len(cells) > 18 else "N/A"
                         status += f" | TRABAJO: {trabajo.upper()}"
-                    return {"status": status, "cliente": val_j.upper(), "zona": zona}
+                    return {"status": status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str}
                 v_hoy, v_mañana = get_fecha_variantes(ahora_vzla), get_fecha_variantes(hoy_vzla + timedelta(days=1))
                 if any(v in curr_date for v in v_hoy): f_status = "🚚 EN RUTA DE HOY"
                 elif any(v in curr_date for v in v_mañana): f_status = "📅 EN RUTA DE MAÑANA"
                 else: f_status = f"🗓️ EN RUTA PARA {curr_date.split(' ')[-1]}"
-                return {"status": f_status, "cliente": val_j.upper(), "zona": zona}
+                return {"status": f_status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str}
     except: pass
     return None
 
 try:
-    df = load_data()
-    p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
+    df, asig_map = load_data()
+    p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates(asig_map)
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
-    # --- SIDEBAR: BUSCADOR ---
     with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
-            res = hybrid_search(search_query, df)
+            res = hybrid_search(search_query, df, asig_map)
             if res:
-                # UNIFICADO EN UN SOLO BLOQUE PARA EVITAR CUADROS RAROS
+                st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
+                st.write(f"**CLIENTE:** {res['cliente']}")
+                st.write(f"**FECHA DE ASIGNACIÓN:** {res['fecha_asig']}")
                 if "INSTALADO" in res['status']:
-                    info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA:</b> {res['fecha']}</p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>"
-                else:
-                    info_extra = f"<p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>"
-                
-                st.markdown(f"""
-                <div class='search-result-card'>
-                    <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                    <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
-                    {info_extra}
-                </div>
-                """, unsafe_allow_html=True)
+                    st.write(f"**FECHA DE INSTALACIÓN:** {res['fecha_inst']}")
+                    st.markdown(f"<p style='color:#00ff00; font-size:12px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p>", unsafe_allow_html=True)
+                    st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
+                else: st.write(f"**ZONA:** {res['zona']}")
+                st.markdown("</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- HEADER CORREGIDO ---
-    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>")
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
@@ -285,7 +296,7 @@ try:
     with c_ayer: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer_lab)}</span></div>{''.join([render_c(c) for c in ruta_ayer_lab])}</div>", unsafe_allow_html=True)
     with c_mat:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
-        items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
+        items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
@@ -305,8 +316,23 @@ try:
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month; df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
         meses_n = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
-        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).size().reset_index(name='Total').sort_values(['Año', 'Mes_Num'], ascending=False)
-        for _, row in hist.iterrows(): st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span></div>", unsafe_allow_html=True)
+        
+        # Agrupar por mes y calcular conteo y media de días
+        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).agg(Total=('Contrato', 'size'), Media_Dias=('Dias_Realizacion', 'mean')).reset_index()
+        hist = hist.sort_values(['Año', 'Mes_Num'], ascending=False)
+        
+        for _, row in hist.iterrows():
+            media_val = f"{row['Media_Dias']:.1f}" if not pd.isna(row['Media_Dias']) else "0"
+            st.markdown(f"""
+                <div class='month-row'>
+                    <span>{row['Mes_Nombre']} {int(row['Año'])}</span>
+                    <span>
+                        <span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span>
+                        <span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {media_val} días</span>
+                    </span>
+                </div>
+            """, unsafe_allow_html=True)
+            
     with col_h2: st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global</div><div style='font-size: 72px; font-weight: 800;'>{len(df):,}</div><div style='font-size: 13px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
 except Exception as e:
     st.error(f"Error detectado: {e}")
