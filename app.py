@@ -78,8 +78,6 @@ st.markdown("""
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # --- PASO A: Obtener Mapa de Asignaciones vía API (Para evitar error de hoja no encontrada) ---
     creds_info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(creds_info)
     service = build('sheets', 'v4', credentials=creds)
@@ -87,7 +85,6 @@ def load_data():
     
     asig_data = service.spreadsheets().values().get(spreadsheetId=asig_id, range="ASIGNADOS!A:G").execute()
     rows_asig = asig_data.get('values', [])
-    
     asig_map = {}
     current_date = None
     for row in rows_asig:
@@ -100,7 +97,6 @@ def load_data():
         if contrato and current_date and contrato not in asig_map:
             asig_map[contrato] = current_date
 
-    # --- PASO B: Cargar Base Principal ---
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
     
@@ -119,10 +115,12 @@ def load_data():
     df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
-    
-    # --- PASO C: Cruce Virtual ---
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
-    df['Dias_Realizacion'] = (df['Fecha_Limpia'] - df['Fecha_Asignacion']).dt.days
+    
+    # FIX PARA EL ERROR .dt: Convertimos a datetime antes de restar
+    f_inst = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
+    f_asig = pd.to_datetime(df['Fecha_Asignacion'], errors='coerce')
+    df['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
 
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
@@ -255,16 +253,11 @@ try:
         if search_query:
             res = hybrid_search(search_query, df, asig_map)
             if res:
-                st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
-                st.write(f"**CLIENTE:** {res['cliente']}")
-                st.write(f"**FECHA DE ASIGNACIÓN:** {res['fecha_asig']}")
                 if "INSTALADO" in res['status']:
-                    st.write(f"**FECHA DE INSTALACIÓN:** {res['fecha_inst']}")
-                    st.markdown(f"<p style='color:#00ff00; font-size:12px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p>", unsafe_allow_html=True)
-                    st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
-                else: st.write(f"**ZONA:** {res['zona']}")
-                st.markdown("</div>", unsafe_allow_html=True)
+                    info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>"
+                else:
+                    info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>"
+                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p><p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>{info_extra}</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
