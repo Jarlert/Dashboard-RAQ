@@ -52,7 +52,6 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
-    
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -61,34 +60,15 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
-    @media (max-width: 768px) {
-        .metric-container { height: 90px !important; }
-        .m-value { font-size: 18px !important; }
-    }
-    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
-    
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    
-    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
-    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
-    
-    /* Estilo corregido para el buscador */
-    .search-result-card { 
-        background: rgba(0, 212, 255, 0.1); 
-        border: 1px solid #00d4ff; 
-        padding: 15px; 
-        border-radius: 10px; 
-        margin-top: 10px;
-        font-family: 'Poppins', sans-serif;
-    }
+    .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -187,24 +167,61 @@ def get_ruta_by_date(fecha_dt):
         return clientes
     except: return []
 
-# 6. MOTOR DE BÚSQUEDA HÍBRIDO
+# 6. MOTOR DE BÚSQUEDA HÍBRIDO (Actualizado con Tiempo de Realización)
 def hybrid_search(query, df_installed):
     query_clean = query.strip()
     df_installed['Contrato_Str'] = df_installed['Contrato'].astype(str).str.replace('.0', '', regex=False)
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
-    if not match.empty:
-        res = match.iloc[0]
-        f_fmt = res['Fecha_Limpia'].strftime('%d/%m/%y') if res['Fecha_Limpia'] else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha": f_fmt, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
+    
+    # Buscamos la fecha de asignación en la hoja ASIGNADOS para el buscador
+    fecha_asig_str = "N/A"
+    dias_tardo = "N/A"
+    
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:S"], includeGridData=True).execute()
-        rows = result['sheets'][0]['data'][0].get('rowData', [])
+        result_asig = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
+        rows_asig = result_asig['sheets'][0]['data'][0].get('rowData', [])
+        
+        last_date_found = None
+        for r_a in rows_asig:
+            c_a = r_a.get('values', [])
+            if not c_a: continue
+            g_val = c_a[6].get('formattedValue', '').lower() if len(c_a) > 6 else ""
+            if "asignación raq" in g_val:
+                try: last_date_found = datetime.strptime(g_val.split(' ')[-1], '%d/%m/%Y').date()
+                except: pass
+            e_val = c_a[4].get('formattedValue', '').strip() if len(c_a) > 4 else ""
+            if e_val == query_clean and last_date_found:
+                fecha_asig_str = last_date_found.strftime('%d/%m/%y')
+                if not match.empty:
+                    f_inst = match.iloc[0]['Fecha_Limpia']
+                    dias_tardo = (f_inst - last_date_found).days
+                break
+    except: pass
+
+    if not match.empty:
+        res = match.iloc[0]
+        f_inst_str = res['Fecha_Limpia'].strftime('%d/%m/%y') if res['Fecha_Limpia'] else "N/A"
+        return {
+            "status": "✅ 100% INSTALADO", 
+            "cliente": res['Nombre del cliente'], 
+            "fecha_asig": fecha_asig_str,
+            "fecha_inst": f_inst_str,
+            "tardo": dias_tardo,
+            "metros": int(res['Metraje']), 
+            "tensores": int(res['Tensores']), 
+            "onu": res['ONU_Final']
+        }
+    
+    # Si no está instalado, buscar en Rutas... (Lógica anterior mantenida)
+    try:
+        result_ruta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:S"], includeGridData=True).execute()
+        rows_r = result_ruta['sheets'][0]['data'][0].get('rowData', [])
         curr_date, is_pend = "DESCONOCIDA", False
-        for row in rows:
+        for row in rows_r:
             cells = row.get('values', [])
             if not cells: continue
             val_j, val_h = cells[9].get('formattedValue', '').lower().strip() if len(cells) > 9 else "", cells[7].get('formattedValue', '').strip() if len(cells) > 7 else ""
@@ -219,12 +236,12 @@ def hybrid_search(query, df_installed):
                     if "adecuaci" in motivo.lower():
                         trabajo = cells[18].get('formattedValue', 'N/A').strip() if len(cells) > 18 else "N/A"
                         status += f" | TRABAJO: {trabajo.upper()}"
-                    return {"status": status, "cliente": val_j.upper(), "zona": zona}
+                    return {"status": status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str}
                 v_hoy, v_mañana = get_fecha_variantes(ahora_vzla), get_fecha_variantes(hoy_vzla + timedelta(days=1))
                 if any(v in curr_date for v in v_hoy): f_status = "🚚 EN RUTA DE HOY"
                 elif any(v in curr_date for v in v_mañana): f_status = "📅 EN RUTA DE MAÑANA"
                 else: f_status = f"🗓️ EN RUTA PARA {curr_date.split(' ')[-1]}"
-                return {"status": f_status, "cliente": val_j.upper(), "zona": zona}
+                return {"status": f_status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str}
     except: pass
     return None
 
@@ -233,29 +250,24 @@ try:
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
-    # --- SIDEBAR: BUSCADOR ---
     with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
             res = hybrid_search(search_query, df)
             if res:
-                # UNIFICADO EN UN SOLO BLOQUE PARA EVITAR CUADROS RAROS
+                st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
+                st.write(f"**CLIENTE:** {res['cliente']}")
+                st.write(f"**FECHA DE ASIGNACIÓN:** {res.get('fecha_asig', 'N/A')}")
                 if "INSTALADO" in res['status']:
-                    info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA:</b> {res['fecha']}</p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>"
-                else:
-                    info_extra = f"<p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>"
-                
-                st.markdown(f"""
-                <div class='search-result-card'>
-                    <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                    <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
-                    {info_extra}
-                </div>
-                """, unsafe_allow_html=True)
+                    st.write(f"**FECHA DE INSTALACIÓN:** {res['fecha_inst']}")
+                    st.markdown(f"<p style='color:#00ff00; font-size:12px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p>", unsafe_allow_html=True)
+                    st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
+                else: st.write(f"**ZONA:** {res['zona']}")
+                st.markdown("</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- HEADER CORREGIDO ---
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
