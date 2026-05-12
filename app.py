@@ -31,7 +31,6 @@ st_autorefresh(interval=60000, key="datarefresh")
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
-mañana_vzla = hoy_vzla + timedelta(days=1)
 
 if ahora_vzla.weekday() == 0:
     ayer_laboral_dt = ahora_vzla - timedelta(days=3)
@@ -63,6 +62,11 @@ st.markdown("""
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
     
+    @media (max-width: 768px) {
+        .metric-container { height: 90px !important; }
+        .m-value { font-size: 18px !important; }
+    }
+    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
@@ -71,12 +75,10 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
-    
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 12px; border-radius: 8px; margin-top: 15px; }
     </style>
     """, unsafe_allow_html=True)
@@ -136,6 +138,7 @@ def load_asignados_aggregates():
                 bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
                 r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
                 if not bg_gen: r = g = b = 1.0
+                # Magenta y Gris claro cuentan como pendientes
                 if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
                 elif abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
         return p_realizar, p_adecuacion, asig_hoy, asig_ayer
@@ -152,6 +155,7 @@ def get_ruta_by_date(fecha_dt):
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         variantes = get_fecha_variantes(fecha_dt)
+        dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
         found, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
@@ -159,7 +163,7 @@ def get_ruta_by_date(fecha_dt):
             val_j, val_h = cells[9].get('formattedValue', '').lower().strip(), cells[7].get('formattedValue', '').strip()
             if any(v in val_j for v in variantes) and not val_h: found = True; continue
             if found:
-                if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h: break
+                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
@@ -170,7 +174,8 @@ def get_ruta_by_date(fecha_dt):
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.851) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
-                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "magenta"
+                        # Magenta se mapea a blanco (Pendiente) para el Dashboard
+                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "white"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
@@ -196,8 +201,7 @@ def hybrid_search(query, df_installed):
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
-            val_j = cells[9].get('formattedValue', '').lower().strip() if len(cells) > 9 else ""
-            val_h = cells[7].get('formattedValue', '').strip() if len(cells) > 7 else ""
+            val_j, val_h = cells[9].get('formattedValue', '').lower().strip() if len(cells) > 9 else "", cells[7].get('formattedValue', '').strip() if len(cells) > 7 else ""
             if "pendiente" in val_j: is_pend = True
             if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h:
                 curr_date = val_j; is_pend = False
@@ -223,7 +227,6 @@ try:
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
-    # --- SIDEBAR: BUSCADOR ---
     with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
@@ -235,15 +238,12 @@ try:
                 st.write(f"**CLIENTE:** {res['cliente']}")
                 if "INSTALADO" in res['status']:
                     st.write(f"**FECHA:** {res['fecha']}")
-                    st.write(f"**METRAJE:** {res['metros']} mts")
-                    st.write(f"**TENSORES:** {res['tensores']} und")
-                    st.write(f"**ONU:** {res['onu']}")
+                    st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
                 else: st.write(f"**ZONA:** {res['zona']}")
                 st.markdown("</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- DASHBOARD UI ---
-    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>")
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
@@ -275,7 +275,7 @@ try:
         items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
-        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ff00ff;'></div><span>Pendiente (Magenta)</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente (Blanco)</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
+        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
