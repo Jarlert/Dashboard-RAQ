@@ -53,6 +53,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
+    
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -61,16 +62,22 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
+    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
-    .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1 solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
+    .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
+    
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
+    
+    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
-    .search-result { background: rgba(0, 212, 255, 0.05); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
+    
+    .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 12px; border-radius: 8px; margin-top: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -163,82 +170,51 @@ def get_ruta_by_date(fecha_dt):
                         if g > 0.8 and r < 0.5 and b < 0.5: color_key = "green"
                         elif abs(r-0.851) < 0.05: color_key = "grey"
                         elif g > 0.9 and b > 0.9 and r < 0.2: color_key = "cyan"
-                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "white"
+                        elif r > 0.9 and g < 0.2 and b > 0.9: color_key = "magenta"
                         clientes.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': tipo, 'color': color_key})
                     except: continue
         return clientes
     except: return []
 
-# 6. MOTOR DE BÚSQUEDA HÍBRIDO (NUEVO)
+# 6. MOTOR DE BÚSQUEDA HÍBRIDO
 def hybrid_search(query, df_installed):
-    # Paso 1: Buscar en Instalados
     query_clean = query.strip()
     df_installed['Contrato_Str'] = df_installed['Contrato'].astype(str).str.replace('.0', '', regex=False)
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
-    
     if not match.empty:
         res = match.iloc[0]
-        return {
-            "status": "✅ 100% INSTALADO",
-            "cliente": res['Nombre del cliente'],
-            "fecha": res['Fecha_Limpia'].strftime('%d/%m/%y') if res['Fecha_Limpia'] else "N/A",
-            "metros": int(res['Metraje']),
-            "tensores": int(res['Tensores']),
-            "onu": res['ONU_Final']
-        }
-    
-    # Paso 2: Buscar en Rutas Pre Planificadas
+        f_fmt = res['Fecha_Limpia'].strftime('%d/%m/%y') if res['Fecha_Limpia'] else "N/A"
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha": f_fmt, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
-        # Leemos hasta columna S para capturar adecuación y trabajo
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:S"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
-        
-        current_date_header = "DESCONOCIDA"
-        is_in_pendientes = False
-        
+        curr_date, is_pend = "DESCONOCIDA", False
         for row in rows:
             cells = row.get('values', [])
             if not cells: continue
-            
             val_j = cells[9].get('formattedValue', '').lower().strip() if len(cells) > 9 else ""
             val_h = cells[7].get('formattedValue', '').strip() if len(cells) > 7 else ""
-            
-            # Detectar si entramos en sección PENDIENTES
-            if "pendiente" in val_j: is_in_pendientes = True
-            
-            # Detectar encabezado de fecha
+            if "pendiente" in val_j: is_pend = True
             if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h:
-                current_date_header = val_j
-                is_in_pendientes = False # Las fechas resetean el modo pendiente
-            
+                curr_date = val_j; is_pend = False
             if val_h == query_clean:
-                nombre = val_j.upper()
                 zona = cells[12].get('formattedValue', '').upper() if len(cells) > 12 else "N/A"
-                
-                if is_in_pendientes:
+                if is_pend:
                     motivo = cells[17].get('formattedValue', 'SIN MOTIVO').strip() if len(cells) > 17 else "N/A"
-                    status_str = f"⚠️ PENDIENTE POR: {motivo.upper()}"
+                    status = f"⚠️ PENDIENTE POR: {motivo.upper()}"
                     if "adecuaci" in motivo.lower():
                         trabajo = cells[18].get('formattedValue', 'N/A').strip() if len(cells) > 18 else "N/A"
-                        status_str += f" | TRABAJO A REALIZAR: {trabajo.upper()}"
-                    return {"status": status_str, "cliente": nombre, "zona": zona}
-                
-                # Lógica de Ruta (Hoy, Mañana, Futuro)
-                v_hoy = get_fecha_variantes(ahora_vzla)
-                v_mañana = get_fecha_variantes(mañana_vzla)
-                
-                if any(v in current_date_header for v in v_hoy): final_status = "🚚 EN RUTA DE HOY"
-                elif any(v in current_date_header for v in v_mañana): final_status = "📅 EN RUTA DE MAÑANA"
-                else:
-                    fecha_corta = current_date_header.split(' ')[-1] if ' ' in current_date_header else current_date_header
-                    final_status = f"🗓️ EN RUTA PARA {fecha_corta}"
-                
-                return {"status": final_status, "cliente": nombre, "zona": zona}
-                
+                        status += f" | TRABAJO: {trabajo.upper()}"
+                    return {"status": status, "cliente": val_j.upper(), "zona": zona}
+                v_hoy, v_mañana = get_fecha_variantes(ahora_vzla), get_fecha_variantes(hoy_vzla + timedelta(days=1))
+                if any(v in curr_date for v in v_hoy): f_status = "🚚 EN RUTA DE HOY"
+                elif any(v in curr_date for v in v_mañana): f_status = "📅 EN RUTA DE MAÑANA"
+                else: f_status = f"🗓️ EN RUTA PARA {curr_date.split(' ')[-1]}"
+                return {"status": f_status, "cliente": val_j.upper(), "zona": zona}
     except: pass
     return None
 
@@ -247,14 +223,14 @@ try:
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = load_asignados_aggregates()
     ruta_hoy, ruta_ayer_lab = get_ruta_by_date(ahora_vzla), get_ruta_by_date(ayer_laboral_dt)
     
-    # --- SIDEBAR: BUSCADOR HÍBRIDO ---
+    # --- SIDEBAR: BUSCADOR ---
     with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
             res = hybrid_search(search_query, df)
             if res:
-                st.markdown(f"<div class='search-result'>", unsafe_allow_html=True)
+                st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
                 st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
                 st.write(f"**CLIENTE:** {res['cliente']}")
                 if "INSTALADO" in res['status']:
@@ -262,11 +238,9 @@ try:
                     st.write(f"**METRAJE:** {res['metros']} mts")
                     st.write(f"**TENSORES:** {res['tensores']} und")
                     st.write(f"**ONU:** {res['onu']}")
-                else:
-                    st.write(f"**ZONA:** {res['zona']}")
+                else: st.write(f"**ZONA:** {res['zona']}")
                 st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.warning("Contrato no encontrado en ninguna base.")
+            else: st.warning("Contrato no encontrado.")
 
     # --- DASHBOARD UI ---
     st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
@@ -279,10 +253,10 @@ try:
     with k3:
         def get_jueves(d): return d - timedelta(days=(d.isoweekday() - 4) % 7)
         i_s = get_jueves(hoy_vzla); f_s = i_s + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Actual</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div><div class='m-sub'>{i_s.strftime('%d/%m')} al {f_s.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k4:
         i_p = get_jueves(hoy_vzla) - timedelta(days=7); f_p = i_p + timedelta(days=6)
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Sem. Pasada</div><div class='m-value'>{len(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div><div class='m-sub'>{i_p.strftime('%d/%m')} al {f_p.strftime('%d/%m')}</div></div>", unsafe_allow_html=True)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_hoy}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
 
@@ -301,7 +275,7 @@ try:
         items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
         st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
     with c_leg:
-        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
+        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ff00ff;'></div><span>Pendiente (Magenta)</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente (Blanco)</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Productividad de Técnicos</div>", unsafe_allow_html=True)
     tech_cols = df.iloc[:, 22:25].values.flatten()
