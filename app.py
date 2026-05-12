@@ -84,21 +84,36 @@ def load_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    asig_data = service.spreadsheets().values().get(spreadsheetId=asig_id, range="ASIGNADOS!A:G").execute()
-    rows_asig = asig_data.get('values', [])
+    # --- PASO A: Obtener Mapa de Asignaciones buscando FILAS NARANJAS (#ff9900) ---
+    asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
+    rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
+    
     asig_map = {}
     current_date = None
     for row in rows_asig:
-        if len(row) < 7: continue
-        val_g = str(row[6]).lower()
-        if "asignación raq" in val_g:
-            try: current_date = pd.to_datetime(val_g.split(' ')[-1], dayfirst=True).date()
+        cells = row.get('values', [])
+        if len(cells) < 7: continue
+        
+        # Detectar color naranja en Columna G (#ff9900 -> R:1.0, G:0.6, B:0.0)
+        bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
+        is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
+        
+        val_g = cells[6].get('formattedValue', '').lower()
+        if is_orange or "asignación raq" in val_g:
+            try:
+                fecha_str = val_g.split(' ')[-1]
+                current_date = pd.to_datetime(fecha_str, dayfirst=True).date()
             except: pass
-        contrato = str(row[4]).replace('.0', '').strip()
-        if contrato and current_date and contrato not in asig_map: asig_map[contrato] = current_date
+            continue
+        
+        contrato = cells[4].get('formattedValue', '').replace('.0', '').strip()
+        if contrato and current_date:
+            asig_map[contrato] = current_date
 
+    # --- PASO B: Cargar Base Principal ---
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
+    
     def parse_individual_date(val):
         v = str(val).strip().lower()
         if not v or v == 'none': return None
@@ -124,6 +139,7 @@ def load_data():
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df.columns if 'Serial ONU' in c or 'Serial' in c]
     df['ONU_Final'] = df[col_onu[0]] if col_onu else "N/A"
+    
     return df, asig_map
 
 # 4. AGREGADOS ASIGNADOS
@@ -201,15 +217,12 @@ def hybrid_search(query, df_installed, asig_map):
     query_clean = query.strip()
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     fecha_asig_dt = asig_map.get(query_clean)
-    # FIX: Validación de fecha nula antes de strftime
     fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
-    
     if not match.empty:
         res = match.iloc[0]
         f_inst_str = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
         tardo_val = res['Dias_Realizacion'] if pd.notnull(res['Dias_Realizacion']) else "N/A"
         return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
-    
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -280,10 +293,12 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
