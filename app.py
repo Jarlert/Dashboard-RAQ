@@ -69,24 +69,34 @@ st.markdown("""
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
+    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA (ACTUALIZADO CON CRUCE VIRTUAL DE ASIGNACIONES)
+# 3. MOTOR DE CARGA (CONGELADO - Protegiendo Febrero/Marzo)
 @st.cache_data(ttl=5)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # --- PASO A: Obtener Mapa de Asignaciones (Virtual) ---
-    df_asig_raw = conn.read(worksheet="ASIGNADOS", ttl=0)
+    # --- PASO A: Obtener Mapa de Asignaciones vía API (Para evitar error de hoja no encontrada) ---
+    creds_info = st.secrets["connections"]["gsheets"]
+    creds = service_account.Credentials.from_service_account_info(creds_info)
+    service = build('sheets', 'v4', credentials=creds)
+    asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
+    
+    asig_data = service.spreadsheets().values().get(spreadsheetId=asig_id, range="ASIGNADOS!A:G").execute()
+    rows_asig = asig_data.get('values', [])
+    
     asig_map = {}
     current_date = None
-    for _, row in df_asig_raw.iterrows():
-        val_g = str(row.iloc[6]).lower() # Columna G
+    for row in rows_asig:
+        if len(row) < 7: continue
+        val_g = str(row[6]).lower()
         if "asignación raq" in val_g:
             try: current_date = pd.to_datetime(val_g.split(' ')[-1], dayfirst=True).date()
             except: pass
-        contrato = str(row.iloc[4]).replace('.0', '').strip() # Columna E
+        contrato = str(row[4]).replace('.0', '').strip()
         if contrato and current_date and contrato not in asig_map:
             asig_map[contrato] = current_date
 
@@ -110,11 +120,9 @@ def load_data():
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     
-    # --- PASO C: Cruce Virtual de Fechas ---
+    # --- PASO C: Cruce Virtual ---
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
-    # Calcular diferencia de días
     df['Dias_Realizacion'] = (df['Fecha_Limpia'] - df['Fecha_Asignacion']).dt.days
-    # Si la diferencia es negativa (error de data) o nula, ponemos 0 o NaN
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
 
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
@@ -194,24 +202,16 @@ def get_ruta_by_date(fecha_dt):
         return clientes
     except: return []
 
-# 6. MOTOR DE BÚSQUEDA HÍBRIDO (Actualizado con Tiempo de Realización)
+# 6. MOTOR DE BÚSQUEDA HÍBRIDO
 def hybrid_search(query, df_installed, asig_map):
     query_clean = query.strip()
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
-    
     fecha_asig_dt = asig_map.get(query_clean)
     fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if fecha_asig_dt else "N/A"
-
     if not match.empty:
         res = match.iloc[0]
         f_inst_str = res['Fecha_Limpia'].strftime('%d/%m/%y')
-        dias = res['Dias_Realizacion']
-        return {
-            "status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], 
-            "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": dias,
-            "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']
-        }
-    
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": res['Dias_Realizacion'], "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -267,7 +267,7 @@ try:
                 st.markdown("</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>")
+    st.markdown(f"<h1 style='text-align: center;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
@@ -316,23 +316,11 @@ try:
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month; df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
         meses_n = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
-        
-        # Agrupar por mes y calcular conteo y media de días
         hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).agg(Total=('Contrato', 'size'), Media_Dias=('Dias_Realizacion', 'mean')).reset_index()
         hist = hist.sort_values(['Año', 'Mes_Num'], ascending=False)
-        
         for _, row in hist.iterrows():
             media_val = f"{row['Media_Dias']:.1f}" if not pd.isna(row['Media_Dias']) else "0"
-            st.markdown(f"""
-                <div class='month-row'>
-                    <span>{row['Mes_Nombre']} {int(row['Año'])}</span>
-                    <span>
-                        <span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span>
-                        <span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {media_val} días</span>
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {media_val} días</span></span></div>", unsafe_allow_html=True)
     with col_h2: st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global</div><div style='font-size: 72px; font-weight: 800;'>{len(df):,}</div><div style='font-size: 13px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
 except Exception as e:
     st.error(f"Error detectado: {e}")
