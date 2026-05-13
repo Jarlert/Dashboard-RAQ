@@ -61,7 +61,7 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
     .bg-white { background-color: #ffffff; color: #000 !important; }
@@ -72,6 +72,7 @@ st.markdown("""
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
+    [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -196,15 +197,15 @@ def get_ruta_by_date(fecha_dt):
         return clientes
     except: return []
 
-# 6. MOTOR DE BÚSQUEDA HÍBRIDO (Actualizado con Libro de Adecuaciones)
+# 6. MOTOR DE BÚSQUEDA HÍBRIDO (CORREGIDO Y AMPLIADO)
 def hybrid_search(query, df_installed, asig_map):
     query_clean = query.strip()
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     fecha_asig_dt = asig_map.get(query_clean)
     fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
     
-    # --- NUEVA BÚSQUEDA EN LIBRO DE ADECUACIONES ---
-    adecuacion_msg = None
+    # --- BÚSQUEDA EN LIBRO DE ADECUACIONES EXTERNAS ---
+    adecuacion_extra = None
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
@@ -214,8 +215,8 @@ def hybrid_search(query, df_installed, asig_map):
         rows_adecu = result_adecu.get('values', [])
         for r_ad in rows_adecu:
             if len(r_ad) >= 1 and str(r_ad[0]).strip() == query_clean:
-                fecha_adecu = r_ad[1] if len(r_ad) > 1 else "N/A"
-                adecuacion_msg = f"⚠️ CLIENTE POR ADECUACIÓN DESDE {fecha_adecu}"
+                fecha_b = r_ad[1] if len(r_ad) > 1 else "N/A"
+                adecuacion_extra = f"⚠️ EN ADECUACIÓN DESDE {fecha_b}"
                 break
     except: pass
 
@@ -223,9 +224,12 @@ def hybrid_search(query, df_installed, asig_map):
         res = match.iloc[0]
         f_inst_str = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
         tardo_val = res['Dias_Realizacion'] if pd.notnull(res['Dias_Realizacion']) else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecuacion": adecuacion_msg}
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst_str, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecuacion_extra": adecuacion_extra}
     
     try:
+        creds_info = st.secrets["connections"]["gsheets"]
+        creds = service_account.Credentials.from_service_account_info(creds_info)
+        service = build('sheets', 'v4', credentials=creds)
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:S"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
@@ -245,12 +249,12 @@ def hybrid_search(query, df_installed, asig_map):
                     if "adecuaci" in motivo.lower():
                         trabajo = cells[18].get('formattedValue', 'N/A').strip() if len(cells) > 18 else "N/A"
                         status += f" | TRABAJO: {trabajo.upper()}"
-                    return {"status": status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str, "adecuacion": adecuacion_msg}
+                    return {"status": status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str, "adecuacion_extra": adecuacion_extra}
                 v_hoy, v_mañana = get_fecha_variantes(ahora_vzla), get_fecha_variantes(hoy_vzla + timedelta(days=1))
                 if any(v in curr_date for v in v_hoy): f_status = "🚚 EN RUTA DE HOY"
                 elif any(v in curr_date for v in v_mañana): f_status = "📅 EN RUTA DE MAÑANA"
                 else: f_status = f"🗓️ EN RUTA PARA {curr_date.split(' ')[-1]}"
-                return {"status": f_status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str, "adecuacion": adecuacion_msg}
+                return {"status": f_status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str, "adecuacion_extra": adecuacion_extra}
     except: pass
     return None
 
@@ -268,14 +272,14 @@ try:
                 st.markdown(f"<div class='search-result-card'>", unsafe_allow_html=True)
                 st.markdown(f"<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>", unsafe_allow_html=True)
                 
-                # MOSTRAR MENSAJE DE ADECUACIÓN SI EXISTE
-                if res.get('adecuacion'):
-                    st.markdown(f"<p style='color:#ff9900; font-size:12px; font-weight:bold;'>{res['adecuacion']}</p>", unsafe_allow_html=True)
+                # MOSTRAR ADECUACIÓN EXTRA SI EXISTE
+                if res.get('adecuacion_extra'):
+                    st.markdown(f"<p style='color:#ff9900; font-size:12px; font-weight:bold;'>{res['adecuacion_extra']}</p>", unsafe_allow_html=True)
                 
                 st.write(f"**CLIENTE:** {res['cliente']}")
-                st.write(f"**FECHA ASIG:** {res['fecha_asig']}")
+                st.write(f"**FECHA DE ASIGNACIÓN:** {res['fecha_asig']}")
                 if "INSTALADO" in res['status']:
-                    st.write(f"**FECHA INST:** {res['fecha_inst']}")
+                    st.write(f"**FECHA DE INSTALACIÓN:** {res['fecha_inst']}")
                     st.markdown(f"<p style='color:#00ff00; font-size:11px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p>", unsafe_allow_html=True)
                     st.write(f"**METRAJE:** {res['metros']} mts"); st.write(f"**TENSORES:** {res['tensores']} und"); st.write(f"**ONU:** {res['onu']}")
                 else: st.write(f"**ZONA:** {res['zona']}")
