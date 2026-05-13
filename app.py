@@ -247,7 +247,7 @@ def hybrid_search(query, df_installed, asig_map):
                 v_hoy, v_mañana = get_fecha_variantes(ahora_vzla), get_fecha_variantes(hoy_vzla + timedelta(days=1))
                 if any(v in curr_date for v in v_hoy): f_status = "🚚 EN RUTA DE HOY"
                 elif any(v in curr_date for v in v_mañana): f_status = "📅 EN RUTA DE MAÑANA"
-                else: f_status = f"🗓️ EN RUTA PARA {curr_date.split(' ')[-1]}"
+                else: f_status = f"🗓️ EN RUTA PARA EL {curr_date.split(' ')[-1]}"
                 return {"status": f_status, "cliente": val_j.upper(), "zona": zona, "fecha_asig": fecha_asig_str}
     except: pass
     return None
