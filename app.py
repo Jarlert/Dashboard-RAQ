@@ -89,24 +89,18 @@ def load_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
-    rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
+    asig_data = service.spreadsheets().values().get(spreadsheetId=asig_id, range="ASIGNADOS!A:G").execute()
+    rows_asig = asig_data.get('values', [])
     asig_map = {}
     current_date = None
     for row in rows_asig:
-        cells = row.get('values', [])
-        if len(cells) < 7: continue
-        bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
-        is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
-        val_g = cells[6].get('formattedValue', '').lower()
-        if is_orange or "asignación raq" in val_g:
-            try:
-                fecha_str = val_g.split(' ')[-1]
-                current_date = pd.to_datetime(fecha_str, dayfirst=True).date()
+        if len(row) < 7: continue
+        val_g = str(row[6]).lower()
+        if "asignación raq" in val_g:
+            try: current_date = pd.to_datetime(val_g.split(' ')[-1], dayfirst=True).date()
             except: pass
-            continue
-        contrato = cells[4].get('formattedValue', '').replace('.0', '').strip()
-        if contrato and current_date: asig_map[contrato] = current_date
+        contrato = str(row[4]).replace('.0', '').strip()
+        if contrato and current_date and contrato not in asig_map: asig_map[contrato] = current_date
 
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
@@ -183,6 +177,7 @@ def get_ruta_by_date(fecha_dt):
         result = service.spreadsheets().get(spreadsheetId=spreadsheet_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
         rows = result['sheets'][0]['data'][0].get('rowData', [])
         variantes = get_fecha_variantes(fecha_dt)
+        dias_semana = ["lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo"]
         found, clientes = False, []
         for row in rows:
             cells = row.get('values', [])
@@ -190,7 +185,7 @@ def get_ruta_by_date(fecha_dt):
             val_j, val_h = cells[9].get('formattedValue', '').lower().strip(), cells[7].get('formattedValue', '').strip()
             if any(v in val_j for v in variantes) and not val_h: found = True; continue
             if found:
-                if "/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]) and not val_h: break
+                if "/" in val_j and any(d in val_j for d in dias_semana) and not val_h: break
                 if val_h and len(val_j) > 2:
                     try:
                         tipo = "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N"
@@ -288,12 +283,13 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
-    # --- MENÚS DE AUDITORÍA ---
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
         with st.expander("🔍 Auditoría: Semana Actual"):
