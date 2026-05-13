@@ -61,16 +61,17 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
+    @media (max-width: 768px) {
+        .metric-container { height: 90px !important; }
+        .m-value { font-size: 18px !important; }
+    }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
-    
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
@@ -96,19 +97,16 @@ def load_data():
     for row in rows_asig:
         cells = row.get('values', [])
         if len(cells) < 7: continue
-        val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
-        
+        val_g = cells[6].get('formattedValue', '').lower()
         if is_orange or "asignación raq" in val_g:
-            parts = val_g.split(' ')
-            for p in parts:
-                if '/' in p:
-                    try: current_date = pd.to_datetime(p, dayfirst=True).date()
-                    except: pass
+            try:
+                fecha_str = val_g.split(' ')[-1]
+                current_date = pd.to_datetime(fecha_str, dayfirst=True).date()
+            except: pass
             continue
-        
-        contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
+        contrato = cells[4].get('formattedValue', '').replace('.0', '').strip()
         if contrato and current_date: asig_map[contrato] = current_date
 
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
@@ -129,10 +127,11 @@ def load_data():
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
     
-    # Cálculo de días
-    df['Dias_Realizacion'] = (pd.to_datetime(df['Fecha_Limpia']) - pd.to_datetime(df['Fecha_Asignacion'])).dt.days
+    f_inst = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
+    f_asig = pd.to_datetime(df['Fecha_Asignacion'], errors='coerce')
+    df['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
-    
+
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df.columns if 'Serial ONU' in c or 'Serial' in c]
@@ -303,10 +302,12 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
