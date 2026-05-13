@@ -76,6 +76,7 @@ st.markdown("""
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
+    [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -88,7 +89,6 @@ def load_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    # --- PASO A: Obtener Mapa de Asignaciones buscando FILAS NARANJAS (#ff9900) ---
     asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
     asig_map = {}
@@ -125,10 +125,12 @@ def load_data():
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
+    
     f_inst = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
     f_asig = pd.to_datetime(df['Fecha_Asignacion'], errors='coerce')
     df['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
+
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df.columns if 'Serial ONU' in c or 'Serial' in c]
@@ -266,7 +268,6 @@ try:
                 st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p><p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>{info_extra}</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- HEADER ---
     st.markdown(f"<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
@@ -287,20 +288,29 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
-    with st.expander("🔍 Auditoría de Tiempos: Semana Actual"):
-        df_sem_actual = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)].copy()
-        if not df_sem_actual.empty:
-            df_audit = df_sem_actual[['Contrato_Str', 'Nombre del cliente', 'Fecha_Asignacion', 'Fecha_Limpia', 'Dias_Realizacion']].copy()
-            df_audit.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
-            st.dataframe(df_audit, use_container_width=True, hide_index=True)
-        else: st.info("No hay instalaciones registradas en la semana actual.")
+    # --- MENÚS DE AUDITORÍA ---
+    col_aud_1, col_aud_2 = st.columns(2)
+    with col_aud_1:
+        with st.expander("🔍 Auditoría: Semana Actual"):
+            df_s_a = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)].copy()
+            if not df_s_a.empty:
+                df_audit = df_s_a[['Contrato_Str', 'Nombre del cliente', 'Fecha_Asignacion', 'Fecha_Limpia', 'Dias_Realizacion']].copy()
+                df_audit.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
+                st.dataframe(df_audit, use_container_width=True, hide_index=True)
+            else: st.info("Sin registros esta semana.")
+    with col_aud_2:
+        with st.expander("🔍 Auditoría: Semana Pasada"):
+            df_s_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)].copy()
+            if not df_s_p.empty:
+                df_audit_p = df_s_p[['Contrato_Str', 'Nombre del cliente', 'Fecha_Asignacion', 'Fecha_Limpia', 'Dias_Realizacion']].copy()
+                df_audit_p.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
+                st.dataframe(df_audit_p, use_container_width=True, hide_index=True)
+            else: st.info("Sin registros la semana pasada.")
 
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
