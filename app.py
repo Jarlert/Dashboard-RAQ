@@ -72,17 +72,9 @@ st.markdown("""
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
     
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
+    .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
     .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
-    
-    /* FICHA DEL CLIENTE (CUADRO AZUL RESTAURADO) */
-    .search-result-card { 
-        background: rgba(0, 212, 255, 0.1); 
-        border: 1px solid #00d4ff; 
-        padding: 15px; 
-        border-radius: 10px; 
-        margin-top: 10px;
-    }
     [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
@@ -96,7 +88,7 @@ def load_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    # --- PASO A: Obtener Mapa de Asignaciones (Escaneo Robusto) ---
+    # --- PASO A: Obtener Mapa de Asignaciones buscando FILAS NARANJAS (#ff9900) ---
     asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
     asig_map = {}
@@ -119,7 +111,6 @@ def load_data():
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and current_date: asig_map[contrato] = current_date
 
-    # --- PASO B: Cargar Base Principal ---
     df_raw = conn.read(worksheet="Base de Datos ", ttl=0) 
     df = df_raw.dropna(subset=["Marca temporal"], how='all').copy()
     def parse_individual_date(val):
@@ -138,7 +129,7 @@ def load_data():
     df['Contrato_Str'] = df['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df['Fecha_Asignacion'] = df['Contrato_Str'].map(asig_map)
     
-    # Cálculo de días (Solo si ambas fechas existen)
+    # Cálculo de días
     df['Dias_Realizacion'] = (pd.to_datetime(df['Fecha_Limpia']) - pd.to_datetime(df['Fecha_Asignacion'])).dt.days
     df.loc[df['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
     
@@ -225,7 +216,6 @@ def hybrid_search(query, df_installed, asig_map):
     fecha_asig_dt = asig_map.get(query_clean)
     fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
     
-    # Búsqueda en Adecuaciones Externas
     adecu_msg = None
     try:
         creds_info = st.secrets["connections"]["gsheets"]
@@ -242,7 +232,8 @@ def hybrid_search(query, df_installed, asig_map):
     if not match.empty:
         res = match.iloc[0]
         f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": res['Dias_Realizacion'], "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        tardo_val = res['Dias_Realizacion'] if pd.notnull(res['Dias_Realizacion']) else "N/A"
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     
     try:
         spreadsheet_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
@@ -284,14 +275,11 @@ try:
         if search_query:
             res = hybrid_search(search_query, df, asig_map)
             if res:
-                # UNIFICADO EN UN SOLO BLOQUE CON RECUADRO AZUL
+                adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
                 if "INSTALADO" in res['status']:
                     info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>"
                 else:
                     info_extra = f"<p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>"
-                
-                adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                
                 st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>{info_extra}</div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
