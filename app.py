@@ -83,36 +83,31 @@ def fetch_all_data():
     creds_info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(creds_info)
     service = build('sheets', 'v4', credentials=creds)
-    
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    # --- CARGA 1: Hoja ASIGNADOS (Para Mapa y KPIs) ---
+    # Carga 1: ASIGNADOS (Mapa y KPIs)
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # --- CARGA 2: Hoja RUTAS PRE PLANIFICADAS (Para Listas) ---
+    # Carga 2: RUTAS PRE PLANIFICADAS (Listas)
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # --- CARGA 3: Base de Datos Principal ---
+    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
     
     return rows_asig, rows_ruta, df_main
 
 def process_data(rows_asig, rows_ruta, df_main):
-    # 1. Construir Mapa de Asignaciones y Conteos
     asig_map = {}
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = 0, 0, 0, 0
     v_hoy, v_ayer = get_fecha_variantes(ahora_vzla), get_fecha_variantes(ayer_laboral_dt)
-    
-    current_date_asig = None
-    f_h, f_a = False, False
+    current_date_asig, f_h, f_a = None, False, False
 
     for row in rows_asig:
         cells = row.get('values', [])
         if len(cells) < 7: continue
-        
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
@@ -123,7 +118,6 @@ def process_data(rows_asig, rows_ruta, df_main):
                 if '/' in p:
                     try: current_date_asig = pd.to_datetime(p, dayfirst=True).date()
                     except: pass
-            # Lógica de bloques para KPIs
             if any(v in val_g for v in v_hoy): f_h, f_a = True, False
             elif any(v in val_g for v in v_ayer): f_a, f_h = True, False
             else: f_h = f_a = False
@@ -135,15 +129,12 @@ def process_data(rows_asig, rows_ruta, df_main):
             if f_h: asig_hoy += 1
             if f_a: asig_ayer += 1
 
-        # Conteo de estados por color (Col B)
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
-            r, g, b = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)
-            if not bg_gen: r = g = b = 1.0
+            r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
             if (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
             elif abs(r-0.717) < 0.03 and abs(g-0.717) < 0.03: p_adecuacion += 1
 
-    # 2. Procesar Base Principal (CONGELADO)
     def parse_individual_date(val):
         v = str(val).strip().lower()
         if not v or v == 'none': return None
@@ -166,7 +157,6 @@ def process_data(rows_asig, rows_ruta, df_main):
     col_onu = [c for c in df_main.columns if 'Serial ONU' in c or 'Serial' in c]
     df_main['ONU_Final'] = df_main[col_onu[0]] if col_onu else "N/A"
 
-    # 3. Procesar Rutas (Hoy y Ayer)
     def extract_ruta(rows, target_dt):
         variantes = get_fecha_variantes(target_dt)
         dias_sem = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]
@@ -190,16 +180,13 @@ def process_data(rows_asig, rows_ruta, df_main):
 
     ruta_hoy = extract_ruta(rows_ruta, ahora_vzla)
     ruta_ayer = extract_ruta(rows_ruta, ayer_laboral_dt)
-
     return df_main, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer
 
-# 4. MOTOR DE BÚSQUEDA HÍBRIDO
 def hybrid_search(query, df_installed, asig_map):
     query_clean = query.strip()
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     fecha_asig_dt = asig_map.get(query_clean)
     fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
-    
     adecu_msg = None
     try:
         creds_info = st.secrets["connections"]["gsheets"]
@@ -212,10 +199,11 @@ def hybrid_search(query, df_installed, asig_map):
                 adecu_msg = f"⚠️ EN ADECUACIÓN DESDE {r[1] if len(r)>1 else 'N/A'}"
                 break
     except: pass
-
     if not match.empty:
         res = match.iloc[0]
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": res['Dias_Realizacion'], "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
+        tardo_val = res['Dias_Realizacion'] if pd.notnull(res['Dias_Realizacion']) else "N/A"
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     return None
 
 try:
@@ -252,10 +240,12 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
