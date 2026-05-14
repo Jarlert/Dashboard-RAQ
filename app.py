@@ -52,6 +52,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
+    
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -67,18 +68,24 @@ st.markdown("""
         .m-value { font-size: 16px !important; }
     }
     
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 400px; overflow-y: auto; }
-    .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
-    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 450px; overflow-y: auto; }
+    .cliente-item { 
+        font-size: 10px; padding: 8px 12px; margin-bottom: 4px; border-radius: 5px; 
+        color: #000 !important; font-weight: 600; white-space: normal; 
+        line-height: 1.3; border: 1px solid rgba(0,0,0,0.1);
+    }
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
+    
+    .legend-container { display: flex; flex-wrap: wrap; gap: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; margin-top: 10px; }
+    .legend-item { display: flex; align-items: center; font-size: 11px; }
+    .legend-color { width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; }
+    
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 13px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
-    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
-    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
@@ -201,9 +208,8 @@ def hybrid_search(query, df_installed, asig_map):
     except: pass
     if not match.empty:
         res = match.iloc[0]
-        f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
         tardo_val = int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     return None
 
 try:
@@ -217,8 +223,7 @@ try:
             res = hybrid_search(search_query, df, asig_map)
             if res:
                 adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                tardo_text = f"{res['tardo']}" if res.get('tardo') != "N/A" else "N/A"
-                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {tardo_text} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
     st.markdown(f"<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
@@ -241,23 +246,10 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
-
-    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
-    def get_mat_str(df_filt):
-        mts = df_filt['Metraje'].sum()
-        und = df_filt['Tensores'].sum()
-        return f"{mts:,.0f}m | {int(und)}⚙️"
-    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
-    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
-    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
-    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
@@ -275,33 +267,51 @@ try:
                 df_audit_p.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
                 st.dataframe(df_audit_p, use_container_width=True, hide_index=True)
 
+    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    def get_mat_str(df_filt):
+        mts = df_filt['Metraje'].sum()
+        und = df_filt['Tensores'].sum()
+        return f"{mts:,.0f}m | {int(und)}⚙️"
+    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
+    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
+    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
+
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{p_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
 
+    # --- NUEVO DISEÑO DE RUTA Y MATERIALES (GRID 2x2) ---
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
-    c_hoy, c_ayer, c_mat_hoy, c_mat_ayer, c_leg = st.columns([1, 1, 1, 1, 0.8])
+    
+    # Fila 1: Rutas
+    c_r1, c_r2 = st.columns(2)
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
     
-    with c_hoy:
+    with c_r1:
         with st.expander(f"📍 RUTA HOY ({len(ruta_hoy)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
-    with c_ayer:
+    with c_r2:
         with st.expander(f"📍 RUTA AYER LAB. ({len(ruta_ayer)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
-    with c_mat_hoy:
+    
+    # Fila 2: Materiales
+    c_m1, c_m2 = st.columns(2)
+    with c_m1:
         df_hoy_mat = df[df['Fecha_Limpia'] == hoy_vzla]
         with st.expander(f"📍 MATERIALES HOY ({len(df_hoy_mat)})", expanded=False):
             items_mat_hoy = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_hoy_mat.iterrows()])
             st.markdown(f"<div class='ruta-box'>{items_mat_hoy}</div>", unsafe_allow_html=True)
-    with c_mat_ayer:
+    with c_m2:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
         with st.expander(f"📍 MATERIALES AYER ({len(df_ayer_mat)})", expanded=False):
             items_mat_ayer = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
             st.markdown(f"<div class='ruta-box'>{items_mat_ayer}</div>", unsafe_allow_html=True)
-    with c_leg:
-        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
+
+    # Leyenda al final
+    st.markdown("""<div class='legend-container'><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
