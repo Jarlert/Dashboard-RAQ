@@ -75,13 +75,10 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    
-    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
-    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 13px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
-    
-    /* Estilo unificado para todos los expanders */
+    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
@@ -284,21 +281,25 @@ try:
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
-    c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
+    c_hoy, c_ayer, c_mat_hoy, c_mat_ayer, c_leg = st.columns([1, 1, 1, 1, 0.8])
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
     
-    # NUEVOS EXPANDERS PARA RUTA (SOLICITADOS)
     with c_hoy:
         with st.expander(f"📍 RUTA HOY ({len(ruta_hoy)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
     with c_ayer:
         with st.expander(f"📍 RUTA AYER LAB. ({len(ruta_ayer)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
-    with c_mat:
-        with st.expander(f"📍 MATERIALES AYER ({len(df[df['Fecha_Limpia'] == ayer_laboral_vzla])})", expanded=False):
-            df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
-            items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
-            st.markdown(f"<div class='ruta-box'>{items_mat}</div>", unsafe_allow_html=True)
+    with c_mat_hoy:
+        df_hoy_mat = df[df['Fecha_Limpia'] == hoy_vzla]
+        with st.expander(f"📍 MATERIALES HOY ({len(df_hoy_mat)})", expanded=False):
+            items_mat_hoy = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_hoy_mat.iterrows()])
+            st.markdown(f"<div class='ruta-box'>{items_mat_hoy}</div>", unsafe_allow_html=True)
+    with c_mat_ayer:
+        df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
+        with st.expander(f"📍 MATERIALES AYER ({len(df_ayer_mat)})", expanded=False):
+            items_mat_ayer = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
+            st.markdown(f"<div class='ruta-box'>{items_mat_ayer}</div>", unsafe_allow_html=True)
     with c_leg:
         st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
 
