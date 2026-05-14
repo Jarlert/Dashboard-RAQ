@@ -61,14 +61,17 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
+    @media (max-width: 768px) {
+        .metric-container { height: 90px !important; }
+        .m-value { font-size: 18px !important; }
+    }
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
-    .bg-grey { background-color: #d9d9d9; color: #000 !important; }
+    .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    .bg-magenta { background-color: #ff00ff; color: #ffffff !important; }
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 14px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
@@ -86,12 +89,15 @@ def fetch_all_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
+    # Carga 1: ASIGNADOS (Mapa y KPIs) - Buscando filas naranjas #ff9900
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 2: RUTAS PRE PLANIFICADAS (Listas)
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
     
@@ -106,8 +112,10 @@ def process_data(rows_asig, rows_ruta, df_main):
     for row in rows_asig:
         cells = row.get('values', [])
         if len(cells) < 7: continue
+        
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
+        # Detección de naranja #ff9900
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
         
         if is_orange or "asignación raq" in val_g:
@@ -130,9 +138,7 @@ def process_data(rows_asig, rows_ruta, df_main):
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
-            # Gris #d9d9d9 -> 0.85
             if abs(r-0.851) < 0.03 and abs(g-0.851) < 0.03: p_adecuacion += 1
-            # Magenta o Gris muy claro -> Pendientes
             elif (abs(r-0.937) < 0.02) or (r > 0.9 and g < 0.1 and b > 0.9): p_realizar += 1
 
     def parse_individual_date(val):
@@ -174,7 +180,7 @@ def process_data(rows_asig, rows_ruta, df_main):
                     color = "white"
                     if g_c > 0.8 and r_c < 0.5: color = "green"
                     elif abs(r_c-0.851) < 0.05: color = "grey"
-                    elif g_c > 0.9 and b_c > 0.9 and r_c < 0.5: color = "cyan" # Fix: r_c < 0.5 evita que el blanco se vea azul
+                    elif g_c > 0.9 and b_c > 0.9 and r_c < 0.5: color = "cyan"
                     clients.append({'contrato': val_h, 'nombre': val_j.upper(), 'zona': cells[12].get('formattedValue', '').strip().upper(), 'tipo': "M" if "mudanza" in cells[4].get('formattedValue', '').lower() else "N", 'color': color})
         return clients
 
@@ -201,7 +207,9 @@ def hybrid_search(query, df_installed, asig_map):
     except: pass
     if not match.empty:
         res = match.iloc[0]
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": res['Dias_Realizacion'], "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
+        tardo_val = res['Dias_Realizacion'] if pd.notnull(res['Dias_Realizacion']) else "N/A"
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     return None
 
 try:
@@ -238,10 +246,12 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
