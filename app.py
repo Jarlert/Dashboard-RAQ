@@ -25,7 +25,7 @@ if not st.session_state['authenticated']:
             st.rerun()
     st.stop()
 
-st_autorefresh(interval=60000, key="datarefresh")
+st_autorefresh(interval=300000, key="datarefresh")
 
 # --- CONFIGURACIÓN HORA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
@@ -89,18 +89,14 @@ def fetch_all_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    # Carga 1: ASIGNADOS (Mapa y KPIs) - Buscando filas naranjas #ff9900
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # Carga 2: RUTAS PRE PLANIFICADAS (Listas)
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
-    
     return rows_asig, rows_ruta, df_main
 
 def process_data(rows_asig, rows_ruta, df_main):
@@ -115,7 +111,6 @@ def process_data(rows_asig, rows_ruta, df_main):
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
-        
         if is_orange or "asignación raq" in val_g:
             parts = val_g.split(' ')
             for p in parts:
@@ -126,13 +121,11 @@ def process_data(rows_asig, rows_ruta, df_main):
             elif any(v in val_g for v in v_ayer): f_a, f_h = True, False
             else: f_h = f_a = False
             continue
-        
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and current_date_asig:
             asig_map[contrato] = current_date_asig
             if f_h: asig_hoy += 1
             if f_a: asig_ayer += 1
-
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
@@ -205,7 +198,10 @@ def hybrid_search(query, df_installed, asig_map):
     except: pass
     if not match.empty:
         res = match.iloc[0]
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": res['Dias_Realizacion'], "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
+        # CORRECCIÓN: Convertir a int para quitar el .0
+        tardo_val = int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A"
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     return None
 
 try:
@@ -219,7 +215,9 @@ try:
             res = hybrid_search(search_query, df, asig_map)
             if res:
                 adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
+                # CORRECCIÓN: Texto de días sin el .0
+                tardo_text = f"{res['tardo']}" if res.get('tardo') != "N/A" else "N/A"
+                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {tardo_text} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
     st.markdown(f"<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
