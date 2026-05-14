@@ -61,12 +61,10 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
     @media (max-width: 768px) {
         .metric-container { height: 95px !important; }
         .m-value { font-size: 16px !important; }
     }
-    
     .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
     .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
     .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
@@ -91,14 +89,18 @@ def fetch_all_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
+    # Carga 1: ASIGNADOS (Mapa y KPIs) - Buscando filas naranjas #ff9900
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 2: RUTAS PRE PLANIFICADAS (Listas)
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
+    
     return rows_asig, rows_ruta, df_main
 
 def process_data(rows_asig, rows_ruta, df_main):
@@ -113,6 +115,7 @@ def process_data(rows_asig, rows_ruta, df_main):
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
+        
         if is_orange or "asignación raq" in val_g:
             parts = val_g.split(' ')
             for p in parts:
@@ -123,11 +126,13 @@ def process_data(rows_asig, rows_ruta, df_main):
             elif any(v in val_g for v in v_ayer): f_a, f_h = True, False
             else: f_h = f_a = False
             continue
+        
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and current_date_asig:
             asig_map[contrato] = current_date_asig
             if f_h: asig_hoy += 1
             if f_a: asig_ayer += 1
+
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
@@ -220,7 +225,6 @@ try:
     st.markdown(f"<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
-    # --- SECCIÓN 1: RENDIMIENTO OPERATIVO ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -238,34 +242,24 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
-    # --- NUEVA SECCIÓN: CONSUMO DE MATERIALES ---
     st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
-    
     def get_mat_str(df_filt):
         mts = df_filt['Metraje'].sum()
         und = df_filt['Tensores'].sum()
         return f"{mts:,.0f}m | {int(und)}⚙️"
+    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
+    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
+    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
 
-    with m1:
-        val = get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{val}</div></div>", unsafe_allow_html=True)
-    with m2:
-        val = get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{val}</div></div>", unsafe_allow_html=True)
-    with m3:
-        val = get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{val}</div></div>", unsafe_allow_html=True)
-    with m4:
-        val = get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{val}</div></div>", unsafe_allow_html=True)
-
-    # --- AUDITORÍAS ---
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
         with st.expander("🔍 Auditoría: Semana Actual"):
@@ -307,28 +301,11 @@ try:
         df_hist['Mes_Num'] = df_hist['Fecha_DT'].dt.month; df_hist['Año'] = df_hist['Fecha_DT'].dt.year.astype(int)
         meses_n = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         df_hist['Mes_Nombre'] = df_hist['Mes_Num'].map(meses_n)
-        
-        # Agregación para incluir materiales
-        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).agg(
-            Total=('Contrato', 'size'), 
-            Media_Dias=('Dias_Realizacion', 'mean'),
-            Total_Mts=('Metraje', 'sum'),
-            Total_Und=('Tensores', 'sum')
-        ).reset_index()
+        hist = df_hist.groupby(['Año', 'Mes_Num', 'Mes_Nombre']).agg(Total=('Contrato', 'size'), Media_Dias=('Dias_Realizacion', 'mean'), Total_Mts=('Metraje', 'sum'), Total_Und=('Tensores', 'sum')).reset_index()
         hist = hist.sort_values(['Año', 'Mes_Num'], ascending=False)
-        
         for _, row in hist.iterrows():
             media_val = f"{row['Media_Dias']:.1f}" if pd.notnull(row['Media_Dias']) else "0"
-            st.markdown(f"""
-                <div class='month-row'>
-                    <span>{row['Mes_Nombre']} {int(row['Año'])}</span>
-                    <span>
-                        <span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span>
-                        <span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {media_val}d | 📏{row['Total_Mts']:,.0f}m | ⚙️{int(row['Total_Und'])}</span>
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {media_val}d | 📏{row['Total_Mts']:,.0f}m | ⚙️{int(row['Total_Und'])}</span></span></div>", unsafe_allow_html=True)
     with col_h2: st.markdown(f"<div style='background: linear-gradient(135deg, #00d4ff 0%, #0072ff 100%); padding: 40px; border-radius: 20px; text-align: center; color: white;'><div style='font-size: 14px; text-transform: uppercase; opacity: 0.9;'>Total Global</div><div style='font-size: 72px; font-weight: 800;'>{len(df):,}</div><div style='font-size: 13px; opacity: 0.7;'>Récord acumulado</div></div>", unsafe_allow_html=True)
 except Exception as e:
     st.error(f"Error detectado: {e}")
