@@ -46,7 +46,7 @@ def get_fecha_variantes(dt_obj):
     v3 = dt_obj.strftime('%d/%m/%Y')
     return [v1.lower(), v2.lower(), v3.lower()]
 
-# 2. ESTILO CSS DARK PREMIUM
+# 2. ESTILO CSS DARK PREMIUM + RESPONSIVE
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -62,13 +62,13 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
+
     @media (max-width: 768px) {
-        .metric-container { height: 95px !important; }
-        .m-value { font-size: 16px !important; }
+        .metric-container { height: 90px !important; }
+        .m-value { font-size: 18px !important; }
     }
     
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 450px; overflow-y: auto; }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 400px; overflow-y: auto; }
     .cliente-item { 
         font-size: 10px; padding: 8px 12px; margin-bottom: 4px; border-radius: 5px; 
         color: #000 !important; font-weight: 600; white-space: normal; 
@@ -246,10 +246,23 @@ try:
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_ayer}</div></div>", unsafe_allow_html=True)
     with k7:
         avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_s_str = f"{avg_s:.1f}" if pd.notnull(avg_s) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
     with k8:
         avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+        avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
+        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    def get_mat_str(df_filt):
+        mts = df_filt['Metraje'].sum()
+        und = df_filt['Tensores'].sum()
+        return f"{mts:,.0f}m | {int(und)}⚙️"
+    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
+    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
+    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
 
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
@@ -267,29 +280,14 @@ try:
                 df_audit_p.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
                 st.dataframe(df_audit_p, use_container_width=True, hide_index=True)
 
-    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
-    def get_mat_str(df_filt):
-        mts = df_filt['Metraje'].sum()
-        und = df_filt['Tensores'].sum()
-        return f"{mts:,.0f}m | {int(und)}⚙️"
-    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
-    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
-    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
-    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
-
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
     with a1: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES POR REALIZAR</div><div class='m-value'>{p_realizar}</div></div>", unsafe_allow_html=True)
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
 
-    # --- NUEVO DISEÑO DE RUTA Y MATERIALES (GRID 2x2) ---
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
-    
-    # Fila 1: Rutas
     c_r1, c_r2 = st.columns(2)
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
-    
     with c_r1:
         with st.expander(f"📍 RUTA HOY ({len(ruta_hoy)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
@@ -297,7 +295,6 @@ try:
         with st.expander(f"📍 RUTA AYER LAB. ({len(ruta_ayer)})", expanded=False):
             st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
     
-    # Fila 2: Materiales
     c_m1, c_m2 = st.columns(2)
     with c_m1:
         df_hoy_mat = df[df['Fecha_Limpia'] == hoy_vzla]
@@ -310,7 +307,6 @@ try:
             items_mat_ayer = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
             st.markdown(f"<div class='ruta-box'>{items_mat_ayer}</div>", unsafe_allow_html=True)
 
-    # Leyenda al final
     st.markdown("""<div class='legend-container'><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
