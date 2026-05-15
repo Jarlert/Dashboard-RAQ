@@ -25,7 +25,7 @@ if not st.session_state['authenticated']:
             st.rerun()
     st.stop()
 
-st_autorefresh(interval=60000, key="datarefresh")
+st_autorefresh(interval=300000, key="datarefresh")
 
 # --- CONFIGURACIÓN HORA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
@@ -53,6 +53,10 @@ st.markdown("""
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
     
+    /* Alineación de logos para acercarlos al centro */
+    [data-testid="column"]:nth-child(1) [data-testid="stVerticalBlock"] { align-items: flex-end; }
+    [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"] { align-items: flex-start; }
+
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -62,30 +66,18 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-
-    @media (max-width: 768px) {
-        .metric-container { height: 95px !important; }
-        .m-value { font-size: 16px !important; }
-    }
     
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 450px; overflow-y: auto; }
-    .cliente-item { 
-        font-size: 10px; padding: 8px 12px; margin-bottom: 4px; border-radius: 5px; 
-        color: #000 !important; font-weight: 600; white-space: normal; 
-        line-height: 1.3; border: 1px solid rgba(0,0,0,0.1);
-    }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 400px; overflow-y: auto; }
+    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: normal; line-height: 1.3; border: 1px solid rgba(0,0,0,0.1); }
     
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    
-    .legend-container { display: flex; flex-wrap: wrap; gap: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; margin-top: 10px; }
-    .legend-item { display: flex; align-items: center; font-size: 11px; }
-    .legend-color { width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; }
-    
     .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 13px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
+    .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 12px; }
+    .legend-color { width: 15px; height: 15px; border-radius: 3px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
     [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
@@ -99,12 +91,15 @@ def fetch_all_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
+    # Carga 1: ASIGNADOS (Mapa y KPIs)
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 2: RUTAS PRE PLANIFICADAS
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
+    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
     return rows_asig, rows_ruta, df_main
@@ -121,8 +116,9 @@ def process_data(rows_asig, rows_ruta, df_main):
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
+        
         if is_orange or "asignación raq" in val_g:
-            parts = val_g.split(' ')
+            parts = val_g.replace('asignación raq','').strip().split(' ')
             for p in parts:
                 if '/' in p:
                     try: current_date_asig = pd.to_datetime(p, dayfirst=True).date()
@@ -131,11 +127,13 @@ def process_data(rows_asig, rows_ruta, df_main):
             elif any(v in val_g for v in v_ayer): f_a, f_h = True, False
             else: f_h = f_a = False
             continue
+        
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and current_date_asig:
             asig_map[contrato] = current_date_asig
             if f_h: asig_hoy += 1
             if f_a: asig_ayer += 1
+
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
@@ -157,8 +155,12 @@ def process_data(rows_asig, rows_ruta, df_main):
     df_main['Fecha_DT'] = pd.to_datetime(df_main['Fecha_Limpia'], errors='coerce')
     df_main['Contrato_Str'] = df_main['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df_main['Fecha_Asignacion'] = df_main['Contrato_Str'].map(asig_map)
-    df_main['Dias_Realizacion'] = (pd.to_datetime(df_main['Fecha_Limpia']) - pd.to_datetime(df_main['Fecha_Asignacion'])).dt.days
+    
+    f_inst = pd.to_datetime(df_main['Fecha_Limpia'], errors='coerce')
+    f_asig = pd.to_datetime(df_main['Fecha_Asignacion'], errors='coerce')
+    df_main['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df_main.loc[df_main['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
+    
     df_main['Metraje'] = pd.to_numeric(df_main['Metros '], errors='coerce').fillna(0)
     df_main['Tensores'] = pd.to_numeric(df_main['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df_main.columns if 'Serial ONU' in c or 'Serial' in c]
@@ -223,28 +225,21 @@ try:
             res = hybrid_search(search_query, df, asig_map)
             if res:
                 adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                tardo_text = f"{res['tardo']}" if res.get('tardo') != "N/A" else "N/A"
-                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {tardo_text} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- HEADER CON LOGOS SIMÉTRICOS ---
-    col_logo_izq, col_titulo, col_logo_der = st.columns([1, 3, 1])
-    
+    # --- HEADER CON LOGOS ACERCADOS ---
+    col_logo_izq, col_titulo, col_logo_der = st.columns([1.5, 3, 1.5])
     with col_logo_izq:
         try: st.image("logo_izq.png", width=150)
-        except: st.write("") # Espacio si no hay logo
-        
+        except: st.write("")
     with col_titulo:
         st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align: center; color: #00d4ff; margin-top: 0;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
-        
     with col_logo_der:
         try: st.image("logo_der.png", width=150)
-        except: st.write("") # Espacio si no hay logo
+        except: st.write("")
     
-    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-    
-    # --- RESTO DEL DASHBOARD (SIN CAMBIOS) ---
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -269,6 +264,17 @@ try:
         avg_p_str = f"{avg_p:.1f}" if pd.notnull(avg_p) else "0"
         st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_str}</div><div class='m-sub'>Días de respuesta</div></div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    def get_mat_str(df_filt):
+        mts = df_filt['Metraje'].sum()
+        und = df_filt['Tensores'].sum()
+        return f"{mts:,.0f}m | {int(und)}⚙️"
+    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
+    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
+    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
+    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
+
     col_aud_1, col_aud_2 = st.columns(2)
     with col_aud_1:
         with st.expander("🔍 Auditoría: Semana Actual"):
@@ -284,17 +290,6 @@ try:
                 df_audit_p = df_s_p[['Contrato_Str', 'Nombre del cliente', 'Fecha_Asignacion', 'Fecha_Limpia', 'Dias_Realizacion']].copy()
                 df_audit_p.columns = ['Contrato', 'Cliente', 'Asignado', 'Instalado', 'Días']
                 st.dataframe(df_audit_p, use_container_width=True, hide_index=True)
-
-    st.markdown("<div class='section-title'>Consumo de Materiales</div>", unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
-    def get_mat_str(df_filt):
-        mts = df_filt['Metraje'].sum()
-        und = df_filt['Tensores'].sum()
-        return f"{mts:,.0f}m | {int(und)}⚙️"
-    with m1: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Hoy</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
-    with m2: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Ayer</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[df['Fecha_Limpia'] == (hoy_vzla - timedelta(days=1))])}</div></div>", unsafe_allow_html=True)
-    with m3: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Actual</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)])}</div></div>", unsafe_allow_html=True)
-    with m4: st.markdown(f"<div class='metric-container'><div class='m-label'>Gastado Sem. Pasada</div><div class='m-value' style='font-size:18px;'>{get_mat_str(df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)])}</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Estado de Asignaciones (General)</div>", unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
