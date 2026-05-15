@@ -231,22 +231,22 @@ try:
     # --- HEADER CON LOGOS ACERCADOS ---
     col_logo_izq, col_titulo, col_logo_der = st.columns([2, 3, 1.5])
 
-with col_logo_izq:
-    try: 
-        # Mantenemos el ancho en 150 o podemos ajustarlo si deseas que llene el nuevo espacio
-        st.image("logo_izq.png", width=150) 
-    except: 
-        st.write("")
+    with col_logo_izq:
+        try: 
+            # Mantenemos el ancho en 150 o podemos ajustarlo si deseas que llene el nuevo espacio
+            st.image("logo_izq.png", width=150) 
+        except: 
+            st.write("")
         
-with col_titulo:
-    st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center; color: #00d4ff; margin-top: 0;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    with col_titulo:
+        st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color: #00d4ff; margin-top: 0;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
 
-with col_logo_der:
-    try: 
-        st.image("logo_der.png", width=150)
-    except: 
-        st.write("")
+    with col_logo_der:
+        try: 
+            st.image("logo_der.png", width=150)
+        except: 
+            st.write("")
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
