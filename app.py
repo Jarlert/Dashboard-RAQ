@@ -229,11 +229,13 @@ try:
             else: st.warning("Contrato no encontrado.")
 
     # --- HEADER CON LOGOS ACERCADOS ---
-    col_logo_izq, col_titulo, col_logo_der = st.columns([2, 3, 1.5])
+    col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([1, 1.2, 3.5, 1.5])
+
+    with col_espacio:
+        st.write("") # Esta columna permanece vacía para crear el desplazamiento
 
     with col_logo_izq:
         try: 
-            # Mantenemos el ancho en 150 o podemos ajustarlo si deseas que llene el nuevo espacio
             st.image("logo_izq.png", width=150) 
         except: 
             st.write("")
