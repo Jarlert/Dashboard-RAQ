@@ -193,6 +193,7 @@ def process_data(rows_asig, rows_ruta, df_main):
 
 def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
     query_clean = query.strip()
+    res_final = None
     
     # --- 1. BUSCAR EN INSTALADOS ---
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
@@ -200,56 +201,66 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
         res = match.iloc[0]
         fecha_asig_dt = asig_map.get(query_clean)
         fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
-        return {
+        res_final = {
             "status": "✅ 100% INSTALADO", 
             "cliente": res['Nombre del cliente'], 
             "fecha_asig": fecha_asig_str, 
             "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), 
             "tardo": int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A",
             "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'],
-            "tipo": "INSTALADO"
+            "tipo": "INSTALADO",
+            "disclaimer_adecuacion": None  # Por defecto vacío
         }
 
-    # --- 2. BUSCAR EN LIBRO DE ADECUACIONES (ID: 1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY) ---
+    # --- 2. BUSCAR INFO DE ADECUACIÓN (Para disclaimer o para estatus pendiente) ---
     try:
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
         adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
-        # Consultamos Columnas A (Contrato), B (Fecha), C (Motivo), D (Trabajo)
         res_ad = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:D").execute()
         adecu_rows = res_ad.get('values', [])
         
         for row in adecu_rows:
             if len(row) >= 1 and str(row[0]).strip() == query_clean:
-                # Si lo encuentra en adecuación, necesitamos buscar su ZONA en Rutas o Asignados
+                fecha_adecu = row[1] if len(row) > 1 else "N/A"
+                
+                # Si ya lo encontramos instalado, le añadimos el disclaimer
+                if res_final and res_final["tipo"] == "INSTALADO":
+                    res_final["disclaimer_adecuacion"] = f"⚠️ EN ADECUACIÓN DESDE: {fecha_adecu}"
+                    return res_final # Retornamos el instalado con el aviso
+                
+                # Si NO estaba instalado, es un caso de adecuación pendiente
                 zona_encontrada = "N/A"
                 nombre_cliente = "DESCONOCIDO"
-                
-                # Buscar zona y nombre en rows_ruta (Columna H=Contrato, J=Nombre, M=Zona)
                 for r_ruta in rows_ruta:
                     c_ruta = r_ruta.get('values', [])
                     if len(c_ruta) > 12 and str(c_ruta[7].get('formattedValue', '')).strip() == query_clean:
                         zona_encontrada = str(c_ruta[12].get('formattedValue', '')).upper()
                         nombre_cliente = str(c_ruta[9].get('formattedValue', '')).upper()
                         break
-
-                fecha_asig_dt = asig_map.get(query_clean)
-                fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "PENDIENTE"
-
+                if zona_encontrada == "N/A":
+                    for r_asig in rows_asig:
+                        c_asig = r_asig.get('values', [])
+                        if len(c_asig) > 4 and str(c_asig[4].get('formattedValue', '')).strip() == query_clean:
+                            zona_encontrada = str(c_asig[1].get('formattedValue', '')).upper()
+                            break
+                
                 return {
-                    "status": f"⚠️ PENDIENTE POR ADECUACION DESDE {row[1] if len(row)>1 else 'N/A'}",
+                    "status": f"⚠️ CLIENTE EN ESPERA DESDE {fecha_adecu}",
                     "cliente": nombre_cliente,
-                    "fecha_asig": fecha_asig_str,
+                    "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
                     "zona": zona_encontrada,
                     "motivo": row[2] if len(row)>2 else "No especificado",
                     "trabajo": row[3] if len(row)>3 else "No especificado",
                     "tipo": "ADECUACION"
                 }
-    except Exception as e:
-        pass
+    except: pass
 
-    # --- 3. BUSCAR EN RUTAS PRE PLANIFICADAS (Si no estaba en los anteriores) ---
+    # Si encontramos instalado pero no estaba en la lista de adecuaciones, retornamos el instalado normal
+    if res_final: return res_final
+
+    # --- 3. BUSCAR EN RUTAS PRE PLANIFICADAS (Si no es nada de lo anterior) ---
     current_date_header = "FECHA NO DEFINIDA"
     for r in rows_ruta:
         cells = r.get('values', [])
@@ -258,8 +269,7 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
         if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
             current_date_header = val_j.upper()
             continue
-        val_h = str(cells[7].get('formattedValue', '')).strip()
-        if val_h == query_clean:
+        if str(cells[7].get('formattedValue', '')).strip() == query_clean:
             return {
                 "status": f"📍 EN RUTA PARA: {current_date_header}",
                 "cliente": str(cells[9].get('formattedValue', '')).upper(),
@@ -267,7 +277,6 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                 "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
                 "tipo": "EN_RUTA"
             }
-            
     return None
 
 try:
@@ -278,48 +287,55 @@ try:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
-            # Pasamos rows_ruta que ya obtuviste en fetch_all_data()
             res = hybrid_search(search_query, df, asig_map, rows_ruta, rows_asig)
         
             if res:
                 if res["tipo"] == "INSTALADO":
+                    # Lógica para mostrar el aviso de adecuación si existe
+                    disclaimer_html = ""
+                    if res.get("disclaimer_adecuacion"):
+                        disclaimer_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:-5px; margin-bottom:10px;'>{res['disclaimer_adecuacion']}</p>"
+
                     st.markdown(f"""
                         <div class='search-result-card'>
                             <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                            {disclaimer_html}
                             <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
                             <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
                             <p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
                             <p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS</b></p>
+                            <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
                             <p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p>
                             <p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p>
                             <p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>
                         </div>
                     """, unsafe_allow_html=True)
+                
                 elif res["tipo"] == "ADECUACION":
-                    # DISEÑO PARA ADECUACIÓN
+                    # (Mismo diseño rojo que ya teníamos)
                     st.markdown(f"""
                         <div class='search-result-card' style='border-color: #ff4b4b; background: rgba(255, 75, 75, 0.1);'>
                             <p style='color:#ff4b4b; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
                             <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
                             <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                            <p style='font-size:12px; margin:5px 0 0 0;'><b>MOTIVO:</b> {res['motivo']}</p>
-                            <p style='font-size:12px; margin:0;'><b>TRABAJO A REALIZAR:</b> {res['trabajo']}</p>
+                            <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,75,75,0.2);'>
+                            <p style='font-size:12px; margin:0;'><b>MOTIVO:</b> {res['motivo']}</p>
+                            <p style='font-size:12px; margin:0;'><b>TRABAJO:</b> {res['trabajo']}</p>
                         </div>
                     """, unsafe_allow_html=True)
-
+                
                 else:
-                    # Tarjeta EN RUTA con FECHA ASIG y ZONA
+                    # (Mismo diseño naranja para En Ruta)
                     st.markdown(f"""
                         <div class='search-result-card' style='border-color: #ff9900;'>
                             <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
                             <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
                             <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
                             <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
-                            <p style='font-size:11px; color:#8899a6; margin-top:5px;'>Este contrato aún no ha sido reportado como instalado.</p>
                         </div>
                     """, unsafe_allow_html=True)
             else:
-                st.warning("Contrato no encontrado en Base de Datos ni en Rutas.")
+                st.warning("Contrato no encontrado.")
 
     # --- HEADER CON LOGOS ACERCADOS ---
     col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([0.6, 1, 3.5, 1.5])
