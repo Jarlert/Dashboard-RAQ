@@ -201,7 +201,6 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
         fecha_asig_dt = asig_map.get(query_clean)
         fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
         
-        # Disclaimer de adecuación si existió antes de instalarse
         disclaimer = None
         try:
             adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
@@ -218,7 +217,7 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
         return {
             "tipo": "INSTALADO",
             "status": "✅ 100% INSTALADO",
-            "cliente": res['Nombre del cliente'],
+            "cliente": str(res['Nombre del cliente']).upper(),
             "fecha_asig": fecha_asig_str,
             "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'),
             "tardo": int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A",
@@ -243,19 +242,24 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                 motivo = row[2] if len(row)>2 else "No especificado"
                 trabajo = row[3] if len(row)>3 else "No especificado"
                 
-                # Verificar si esta adecuación ya está en ruta
                 fecha_programada_ruta = None
                 zona_encontrada = "N/A"
                 nombre_cliente = "DESCONOCIDO"
-                header_temporal = "FECHA NO DEFINIDA"
+                header_temporal = "SIN ASIGNAR"
 
                 for r_ruta in rows_ruta:
                     c_ruta = r_ruta.get('values', [])
                     if len(c_ruta) < 10: continue
-                    val_j = str(c_ruta[9].get('formattedValue', '')).lower()
-                    if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
-                        header_temporal = val_j.upper()
+                    val_j = str(c_ruta[9].get('formattedValue', '')).upper()
+                    
+                    # DETECCIÓN DE CABECERAS (Fecha o Pendientes)
+                    if "/" in val_j and any(d in val_j for d in ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]):
+                        header_temporal = val_j
                         continue
+                    elif "PENDIENTE" in val_j:
+                        header_temporal = "PENDIENTE EN RUTA"
+                        continue
+                    
                     if str(c_ruta[7].get('formattedValue', '')).strip() == query_clean:
                         fecha_programada_ruta = header_temporal
                         zona_encontrada = str(c_ruta[12].get('formattedValue', '')).upper()
@@ -270,7 +274,7 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                             break
 
                 if fecha_programada_ruta:
-                    status_final = f"📍 ADECUACIÓN EN RUTA PARA: {fecha_programada_ruta}"
+                    status_final = f"📍 ADECUACIÓN: {fecha_programada_ruta}"
                     color_alerta = "#00ffff" 
                 else:
                     status_final = f"⚠️ CLIENTE EN ESPERA DESDE {fecha_adecu}"
@@ -289,18 +293,23 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
     except: pass
 
     # --- 3. BUSCAR EN RUTAS NORMALES ---
-    current_date_header = "FECHA NO DEFINIDA"
+    current_date_header = "SIN FECHA"
     for r in rows_ruta:
         cells = r.get('values', [])
         if len(cells) < 10: continue
-        val_j = str(cells[9].get('formattedValue', '')).lower()
-        if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
-            current_date_header = val_j.upper()
+        val_j = str(cells[9].get('formattedValue', '')).upper()
+        
+        if "/" in val_j and any(d in val_j for d in ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]):
+            current_date_header = val_j
             continue
+        elif "PENDIENTE" in val_j:
+            current_date_header = "PENDIENTE EN RUTA"
+            continue
+
         if str(cells[7].get('formattedValue', '')).strip() == query_clean:
             return {
                 "tipo": "EN_RUTA",
-                "status": f"📍 EN RUTA PARA: {current_date_header}",
+                "status": f"📍 {current_date_header}",
                 "cliente": str(cells[9].get('formattedValue', '')).upper(),
                 "zona": str(cells[12].get('formattedValue', '')).upper() if len(cells) > 12 else "N/A",
                 "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE"
@@ -319,49 +328,47 @@ try:
         
             if res:
                 if res["tipo"] == "INSTALADO":
-                    # Lógica para mostrar el aviso de adecuación si existe
-                    disclaimer_html = ""
-                    if res.get("disclaimer_adecuacion"):
-                        disclaimer_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:-5px; margin-bottom:10px;'>{res['disclaimer_adecuacion']}</p>"
-
-                    st.markdown(f"""
-                        <div class='search-result-card'>
-                            <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                            {disclaimer_html}
-                            <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
-                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                            <p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
-                            <p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS</b></p>
-                            <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
-                            <p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p>
-                            <p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p>
-                            <p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    disclaimer_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-bottom:10px;'>{res['disclaimer']}</p>" if res.get('disclaimer') else ""
+                    
+                    html_content = f"""
+                    <div style="background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px;">
+                        <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                        {disclaimer_html}
+                        <p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
+                        <p style='color:#00ff00; font-size:11px; margin-top:5px; font-weight:bold;'>EL CLIENTE TARDÓ {res['tardo']} DÍAS</p>
+                        <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
+                        <p style='font-size:12px; margin:0; color:white;'><b>METRAJE:</b> {res['metros']} mts</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>TENSORES:</b> {res['tensores']} und</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>ONU:</b> {res['onu']}</p>
+                    </div>
+                    """
+                    st.markdown(html_content, unsafe_allow_html=True)
                 
                 elif res["tipo"] == "ADECUACION":
-                    # Usamos el color dinámico que viene de la función (Rojo si espera, Cyan si ya está en ruta)
-                    st.markdown(f"""
-                        <div class='search-result-card' style='border-color: {res['color']}; background: rgba(255, 255, 255, 0.05);'>
-                            <p style='color:{res['color']}; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
-                            <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
-                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                            <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
-                            <p style='font-size:12px; margin:0;'><b>MOTIVO:</b> {res['motivo']}</p>
-                            <p style='font-size:12px; margin:0;'><b>TRABAJO:</b> {res['trabajo']}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    html_adecu = f"""
+                    <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid {res['color']}; padding: 15px; border-radius: 10px; margin-top: 10px;">
+                        <p style='color:{res['color']}; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                        <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
+                        <p style='font-size:12px; margin:0; color:white;'><b>MOTIVO:</b> {res['motivo']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>TRABAJO:</b> {res['trabajo']}</p>
+                    </div>
+                    """
+                    st.markdown(html_adecu, unsafe_allow_html=True)
                 
                 else:
-                    # (Mismo diseño naranja para En Ruta)
-                    st.markdown(f"""
-                        <div class='search-result-card' style='border-color: #ff9900;'>
-                            <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                            <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
-                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                            <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    html_ruta = f"""
+                    <div style="background: rgba(255, 153, 0, 0.1); border: 1px solid #ff9900; padding: 15px; border-radius: 10px; margin-top: 10px;">
+                        <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                        <p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
+                    </div>
+                    """
+                    st.markdown(html_ruta, unsafe_allow_html=True)
             else:
                 st.warning("Contrato no encontrado.")
 
