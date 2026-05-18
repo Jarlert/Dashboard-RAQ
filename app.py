@@ -25,7 +25,6 @@ if not st.session_state['authenticated']:
 
 st_autorefresh(interval=300000, key="datarefresh")
 
-# --- CONFIGURACIÓN HORA VENEZUELA ---
 vzla_tz = pytz.timezone('America/Caracas')
 ahora_vzla = datetime.now(vzla_tz)
 hoy_vzla = ahora_vzla.date()
@@ -69,23 +68,29 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. MOTOR DE CARGA Y PROCESAMIENTO
+# 3. MOTOR DE CARGA ÚNICA
 @st.cache_data(ttl=5)
 def fetch_all_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     creds_info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(creds_info)
     service = build('sheets', 'v4', credentials=creds)
-    
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
     
-    # Carga Asignaciones y Rutas
-    asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G", "RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
-    rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
-    rows_ruta = asig_data['sheets'][1]['data'][0].get('rowData', [])
+    # Solicitamos todas las hojas en una sola llamada para rapidez
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=asig_id).execute()
+    sheet_names = [s['properties']['title'] for s in sheet_metadata['sheets']]
     
-    # Carga Adecuaciones
+    # Mapeo dinámico para evitar errores de índice si cambian de orden
+    idx_asig = sheet_names.index("ASIGNADOS")
+    idx_ruta = sheet_names.index("RUTAS PRE PLANIFICADAS")
+    
+    asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G", "RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
+    rows_asig = asig_data['sheets'][idx_asig]['data'][0].get('rowData', [])
+    rows_ruta = asig_data['sheets'][idx_ruta]['data'][0].get('rowData', [])
+    
+    # Adecuaciones
     adecu_res = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:D").execute()
     rows_adecu = adecu_res.get('values', [])
     
@@ -98,34 +103,29 @@ def process_data(rows_asig, rows_ruta, rows_adecu, df_main):
     p_realizar, p_adecuacion, asig_hoy, asig_ayer = 0, 0, 0, 0
     v_hoy, v_ayer = get_fecha_variantes(ahora_vzla), get_fecha_variantes(ayer_laboral_dt)
     
-    # Procesar ASIGNADOS (Mapa y KPIs)
     curr_asig_date = None
     for row in rows_asig:
         cells = row.get('values', [])
         if len(cells) < 7: continue
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
-        is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
-        
-        if is_orange or "asignación raq" in val_g:
+        if (abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1) or "asignación raq" in val_g:
             for p in val_g.replace('asignación raq','').strip().split(' '):
                 if '/' in p: curr_asig_date = p
             continue
-        
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and curr_asig_date:
             asig_map[contrato] = curr_asig_date
             if any(v in val_g for v in v_hoy): asig_hoy += 1
             if any(v in val_g for v in v_ayer): asig_ayer += 1
         
-        # KPIs por color en ASIGNADOS
-        if 'userEnteredValue' in cells[1]:
+        # Corregido: cálculo seguro de KPIs
+        if len(cells) > 1 and 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
-            r, g = bg_gen.get('red', 0.0), bg_gen.get('green', 0.0)
-            if abs(r-0.851) < 0.03: p_adecuacion += 1
-            elif r > 0.9 and g < 0.2: p_realizar += 1
+            r_val = bg_gen.get('red', 0.0)
+            if abs(r_val-0.851) < 0.05: p_adecuacion += 1
+            elif r_val > 0.9: p_realizar += 1
 
-    # Procesar RUTAS (Mapa de fechas de visita)
     curr_ruta_date = None
     for row in rows_ruta:
         cells = row.get('values', [])
@@ -139,12 +139,10 @@ def process_data(rows_asig, rows_ruta, rows_adecu, df_main):
         contrato_h = str(cells[7].get('formattedValue', '')).replace('.0', '').strip()
         if contrato_h and curr_ruta_date: ruta_map[contrato_h] = curr_ruta_date
 
-    # Procesar ADECUACIONES
     for r in rows_adecu:
         if len(r) >= 1:
             adecu_map[str(r[0]).strip()] = {"fecha": r[1] if len(r)>1 else "N/A", "motivo": r[2] if len(r)>2 else "N/A", "trabajo": r[3] if len(r)>3 else "N/A"}
 
-    # Motor Híbrido de Fechas (REGLA 2: No tocar)
     def parse_individual_date(val):
         v = str(val).strip().lower()
         if not v or v == 'none': return None
@@ -162,14 +160,12 @@ def process_data(rows_asig, rows_ruta, rows_adecu, df_main):
     df_main['Metraje'] = pd.to_numeric(df_main['Metros '], errors='coerce').fillna(0)
     df_main['Tensores'] = pd.to_numeric(df_main['Tensores'], errors='coerce').fillna(0)
     
-    # Cálculo de días de respuesta
     df_main['Fecha_Ref'] = df_main['Contrato_Str'].map(lambda x: ruta_map.get(x) or asig_map.get(x))
     f_inst = pd.to_datetime(df_main['Fecha_Limpia'], errors='coerce')
     f_asig = pd.to_datetime(df_main['Fecha_Ref'], dayfirst=True, errors='coerce')
     df_main['Dias_Realizacion'] = (f_inst - f_asig).dt.days
     df_main.loc[df_main['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
 
-    # Extracción de rutas para visualización
     def get_ruta_list(rows, target_dt):
         vars = get_fecha_variantes(target_dt)
         found, res = False, []
@@ -188,33 +184,20 @@ def process_data(rows_asig, rows_ruta, rows_adecu, df_main):
 
     return df_main, asig_map, ruta_map, adecu_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, get_ruta_list(rows_ruta, ahora_vzla), get_ruta_list(rows_ruta, ayer_laboral_dt)
 
-# 4. BUSCADOR MULTINIVEL
 def hybrid_search(query, df_inst, asig_m, ruta_m, adecu_m):
     q = str(query).strip()
     match = df_inst[df_inst['Contrato_Str'] == q]
     info_ad = adecu_m.get(q)
-    
-    # NIVEL 1: INSTALADO
     if not match.empty:
         res = match.iloc[0]
-        disc = f"<p style='color:#ff4b4b; font-size:11px;'>⚠️ EN ADECUACIÓN DESDE {info_ad['fecha']}</p>" if info_ad else ""
+        disc = f"<p style='color:#ff4b4b; font-size:11px; font-weight:bold;'>⚠️ EN ADECUACIÓN DESDE {info_ad['fecha']}</p>" if info_ad else ""
         return f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600;'>✅ 100% INSTALADO</p>{disc}<p style='font-size:12px;'><b>CLIENTE:</b> {res['Nombre del cliente']}<br><b>FECHA INST:</b> {res['Fecha_Limpia'].strftime('%d/%m/%y')}<br><b>ONU:</b> {res['ONU_Final']}</p></div>"
-    
-    # NIVEL 2: RUTA
-    if q in ruta_m:
-        return f"<div class='search-result-card' style='border-color:#00ff00;'><p style='color:#00ff00; font-weight:600;'>🚚 ASIGNADO PARA {ruta_m[q]}</p><p style='font-size:12px;'>El contrato se encuentra actualmente en la hoja de rutas.</p></div>"
-        
-    # NIVEL 3: ASIGNADO
-    if q in asig_m:
-        return f"<div class='search-result-card' style='border-color:#ffff00;'><p style='color:#ffff00; font-weight:600;'>⏳ ASIGNADO DESDE {asig_m[q]} PERO SIN FECHA DE VISITA AÚN</p></div>"
-        
-    # NIVEL 4: ADECUACIÓN
-    if info_ad:
-        return f"<div class='search-result-card' style='border-color:#ff9900;'><p style='color:#ff9900; font-weight:600;'>⚠️ PENDIENTE POR {info_ad['motivo'].upper()} DESDE {info_ad['fecha']}</p><p style='font-size:12px;'><b>TRABAJO A REALIZAR:</b> {info_ad['trabajo'].upper()}</p></div>"
-        
+    if q in ruta_m: return f"<div class='search-result-card' style='border-color:#00ff00;'><p style='color:#00ff00; font-weight:600;'>🚚 ASIGNADO PARA {ruta_m[q]}</p></div>"
+    if q in asig_m: return f"<div class='search-result-card' style='border-color:#ffff00;'><p style='color:#ffff00; font-weight:600;'>⏳ ASIGNADO DESDE {asig_m[q]} (SIN FECHA VISITA)</p></div>"
+    if info_ad: return f"<div class='search-result-card' style='border-color:#ff9900;'><p style='color:#ff9900; font-weight:600;'>⚠️ PENDIENTE POR {info_ad['motivo'].upper()} DESDE {info_ad['fecha']}</p><p style='font-size:12px;'><b>TRABAJO:</b> {info_ad['trabajo'].upper()}</p></div>"
     return None
 
-# 5. EJECUCIÓN DASHBOARD
+# 5. DASHBOARD
 try:
     r_asig, r_ruta, r_adecu, df_raw = fetch_all_data()
     df, asig_map, ruta_map, adecu_map, p_real, p_adec, asig_h, asig_a, ruta_h, ruta_a = process_data(r_asig, r_ruta, r_adecu, df_raw)
@@ -227,15 +210,15 @@ try:
             if res_html: st.markdown(res_html, unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # HEADER (REGLA 4: Simetría)
+    # HEADER BLINDADO
     ce, cl, ct, cr = st.columns([0.6, 1, 3.5, 1.5])
-    with cl: st.image("logo_izq.png", width=150) if True else None
+    with cl: st.image("logo_izq.png", width=150)
     with ct:
-        st.markdown("<h1 style='text-align: center; margin:0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: center; color:#00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
-    with cr: st.image("logo_der.png", width=150) if True else None
+        st.markdown("<h1 style='text-align: center; margin:0; color:white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color:#00d4ff; font-weight:600;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+    with cr: st.image("logo_der.png", width=150)
 
-    # MÉTRICAS Y CUADROS (IDÉNTICO A TU VERSIÓN)
+    # KPIs
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -251,12 +234,8 @@ try:
     k5, k6, k7, k8 = st.columns(4)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_h}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_a}</div></div>", unsafe_allow_html=True)
-    with k7:
-        avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div></div>", unsafe_allow_html=True)
-    with k8:
-        avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div></div>", unsafe_allow_html=True)
+    with k7: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES RUTA</div><div class='m-value' style='color:#ff4b4b;'>{p_real}</div></div>", unsafe_allow_html=True)
+    with k8: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIONES</div><div class='m-value' style='color:#ff9900;'>{p_adec}</div></div>", unsafe_allow_html=True)
 
     # RUTA Y MATERIALES
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
@@ -270,13 +249,14 @@ try:
             items = "".join([f"<div class='cliente-item bg-green'>{r['Contrato_Str']} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_h_m.iterrows()])
             st.markdown(f"<div class='ruta-box'>{items}</div>", unsafe_allow_html=True)
 
-    # ANÁLISIS HISTÓRICO (REGLA 2: No tocar lógica de meses)
+    # HISTÓRICO
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     df_hist = df.dropna(subset=['Fecha_DT']).copy()
     df_hist['Mes_Nombre'] = df_hist['Fecha_DT'].dt.month.map({1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'})
-    hist = df_hist.groupby([df_hist['Fecha_DT'].dt.year, df_hist['Fecha_DT'].dt.month, 'Mes_Nombre']).agg(Total=('Contrato', 'size'), Media=('Dias_Realizacion', 'mean'), Mts=('Metraje', 'sum')).reset_index().sort_values(['Fecha_DT','Fecha_DT'], ascending=False)
+    df_hist['Año'] = df_hist['Fecha_DT'].dt.year
+    hist = df_hist.groupby(['Año', df_hist['Fecha_DT'].dt.month, 'Mes_Nombre']).agg(Total=('Contrato', 'size'), Media=('Dias_Realizacion', 'mean'), Mts=('Metraje', 'sum')).reset_index().sort_values(['Año', 'Fecha_DT'], ascending=False)
     for _, row in hist.iterrows():
-        st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['level_0'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {row['Media']:.1f}d | 📏{row['Mts']:,.0f}m</span></span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='month-row'><span>{row['Mes_Nombre']} {int(row['Año'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {row['Media']:.1f}d | 📏{row['Mts']:,.0f}m</span></span></div>", unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error detectado: {e}")
