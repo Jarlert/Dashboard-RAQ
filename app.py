@@ -68,7 +68,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. FUNCIONES DE APOYO
 def parse_individual_date(val):
     v = str(val).strip().lower()
     if not v or v == 'none': return None
@@ -93,7 +92,6 @@ def hybrid_search(query, df_inst, asig_m, ruta_m, adecu_m):
     if info_ad: return f"<div class='search-result-card' style='border-color:#ff9900;'><p style='color:#ff9900; font-weight:600;'>⚠️ PENDIENTE POR {info_ad['motivo'].upper()} DESDE {info_ad['fecha']}</p><p style='font-size:12px;'><b>TRABAJO:</b> {info_ad['trabajo'].upper()}</p></div>"
     return None
 
-# 4. MOTOR DE CARGA
 @st.cache_data(ttl=5)
 def fetch_all_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -103,7 +101,6 @@ def fetch_all_data():
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
     
-    # CORRECCIÓN: Los índices 0 y 1 corresponden al orden en 'ranges'
     asig_data = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G", "RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_asig = asig_data['sheets'][0]['data'][0].get('rowData', [])
     rows_ruta = asig_data['sheets'][1]['data'][0].get('rowData', [])
@@ -115,7 +112,7 @@ def fetch_all_data():
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
     return rows_asig, rows_ruta, rows_adecu, df_main
 
-# --- INICIO RENDERIZADO (Header siempre visible) ---
+# --- HEADER (Siempre visible) ---
 ce, cl, ct, cr = st.columns([0.6, 1, 3.5, 1.5])
 with cl: st.image("logo_izq.png", width=150)
 with ct:
@@ -126,7 +123,6 @@ with cr: st.image("logo_der.png", width=150)
 try:
     r_asig, r_ruta, r_adecu, df_raw = fetch_all_data()
     
-    # Procesar Mapas
     asig_map, ruta_map, adecu_map = {}, {}, {}
     p_real, p_adec, asig_h, asig_a = 0, 0, 0, 0
     v_hoy, v_ayer = get_fecha_variantes(ahora_vzla), get_fecha_variantes(ayer_laboral_dt)
@@ -168,7 +164,6 @@ try:
         if len(r) >= 1:
             adecu_map[str(r[0]).strip()] = {"fecha": r[1] if len(r)>1 else "N/A", "motivo": r[2] if len(r)>2 else "N/A", "trabajo": r[3] if len(r)>3 else "N/A"}
 
-    # Procesar Base de Datos Principal
     df = df_raw.copy()
     df['Fecha_Limpia'] = df["Marca temporal"].apply(parse_individual_date)
     df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
@@ -191,7 +186,6 @@ try:
             if res_html: st.markdown(res_html, unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # Render KPIs
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     with k1: st.markdown(f"<div class='metric-container'><div class='m-label'>Hoy</div><div class='m-value'>{len(df[df['Fecha_Limpia'] == hoy_vzla])}</div></div>", unsafe_allow_html=True)
@@ -209,7 +203,6 @@ try:
     with k7: st.markdown(f"<div class='metric-container'><div class='m-label'>PENDIENTES RUTA</div><div class='m-value' style='color:#ff4b4b;'>{p_real}</div></div>", unsafe_allow_html=True)
     with k8: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIONES</div><div class='m-value' style='color:#ff9900;'>{p_adec}</div></div>", unsafe_allow_html=True)
 
-    # Rutas
     def get_ruta_list(rows, target_dt):
         vars = get_fecha_variantes(target_dt)
         found, res = False, []
@@ -239,13 +232,21 @@ try:
             items = "".join([f"<div class='cliente-item bg-green'>{r['Contrato_Str']} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_h_m.iterrows()])
             st.markdown(f"<div class='ruta-box'>{items}</div>", unsafe_allow_html=True)
 
-    # Histórico
+    # --- HISTÓRICO CORREGIDO (SIN COLISIONES) ---
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     df_hist = df.dropna(subset=['Fecha_DT']).copy()
     df_hist['Mes_Nom'] = df_hist['Fecha_DT'].dt.month.map({1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'})
-    hist = df_hist.groupby([df_hist['Fecha_DT'].dt.year, df_hist['Fecha_DT'].dt.month, 'Mes_Nom']).agg(Total=('Contrato', 'size'), Media=('Dias_Realizacion', 'mean'), Mts=('Metraje', 'sum')).reset_index().sort_values(['level_0', 'level_1'], ascending=False)
+    df_hist['Año_H'] = df_hist['Fecha_DT'].dt.year
+    df_hist['Mes_H'] = df_hist['Fecha_DT'].dt.month
+    
+    hist = df_hist.groupby(['Año_H', 'Mes_H', 'Mes_Nom']).agg(
+        Total=('Contrato', 'size'), 
+        Media=('Dias_Realizacion', 'mean'), 
+        Mts=('Metraje', 'sum')
+    ).reset_index().sort_values(['Año_H', 'Mes_H'], ascending=False)
+    
     for _, row in hist.iterrows():
-        st.markdown(f"<div class='month-row'><span>{row['Mes_Nom']} {int(row['level_0'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {row['Media']:.1f}d | 📏{row['Mts']:,.0f}m</span></span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='month-row'><span>{row['Mes_Nom']} {int(row['Año_H'])}</span><span><span style='color:#00d4ff; font-weight:bold;'>{row['Total']}</span><span style='color:#8899a6; font-size:10px; margin-left:10px;'>Media: {row['Media']:.1f}d | 📏{row['Mts']:,.0f}m</span></span></div>", unsafe_allow_html=True)
 
 except Exception as e:
     st.error(f"Error detectado: {e}")
