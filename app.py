@@ -194,53 +194,74 @@ def process_data(rows_asig, rows_ruta, df_main):
 def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
     query_clean = query.strip()
     
-    # --- 1. BUSCAR EN INSTALADOS (Mantenemos igual) ---
+    # --- 1. BUSCAR EN INSTALADOS ---
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     if not match.empty:
         res = match.iloc[0]
-        # (Resto del código de instalados...)
-        return { "status": "✅ 100% INSTALADO", "tipo": "INSTALADO", ... }
+        fecha_asig_dt = asig_map.get(query_clean)
+        fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
+        
+        # Disclaimer de adecuación si existió antes de instalarse
+        disclaimer = None
+        try:
+            adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
+            creds_info = st.secrets["connections"]["gsheets"]
+            creds = service_account.Credentials.from_service_account_info(creds_info)
+            service = build('sheets', 'v4', credentials=creds)
+            res_ad = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:B").execute()
+            for r_ad in res_ad.get('values', []):
+                if len(r_ad) >= 1 and str(r_ad[0]).strip() == query_clean:
+                    disclaimer = f"⚠️ EN ADECUACIÓN DESDE: {r_ad[1] if len(r_ad)>1 else 'N/A'}"
+                    break
+        except: pass
+
+        return {
+            "tipo": "INSTALADO",
+            "status": "✅ 100% INSTALADO",
+            "cliente": res['Nombre del cliente'],
+            "fecha_asig": fecha_asig_str,
+            "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'),
+            "tardo": int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A",
+            "metros": int(res['Metraje']),
+            "tensores": int(res['Tensores']),
+            "onu": res['ONU_Final'],
+            "disclaimer": disclaimer
+        }
 
     # --- 2. BUSCAR EN LIBRO DE ADECUACIONES ---
     try:
+        adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info)
         service = build('sheets', 'v4', credentials=creds)
-        adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
         res_ad = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:D").execute()
         adecu_rows = res_ad.get('values', [])
         
         for row in adecu_rows:
             if len(row) >= 1 and str(row[0]).strip() == query_clean:
-                # Datos base de la adecuación
                 fecha_adecu = row[1] if len(row) > 1 else "N/A"
                 motivo = row[2] if len(row)>2 else "No especificado"
                 trabajo = row[3] if len(row)>3 else "No especificado"
                 
-                # --- NUEVA LÓGICA: ¿ESTÁ EN RUTA PARA MAÑANA O ALGÚN DÍA? ---
+                # Verificar si esta adecuación ya está en ruta
                 fecha_programada_ruta = None
                 zona_encontrada = "N/A"
                 nombre_cliente = "DESCONOCIDO"
-                
                 header_temporal = "FECHA NO DEFINIDA"
+
                 for r_ruta in rows_ruta:
                     c_ruta = r_ruta.get('values', [])
                     if len(c_ruta) < 10: continue
-                    
-                    # Rastrear la fecha de la cabecera
                     val_j = str(c_ruta[9].get('formattedValue', '')).lower()
                     if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
                         header_temporal = val_j.upper()
                         continue
-                    
-                    # Si el contrato aparece en esta sección de la ruta
                     if str(c_ruta[7].get('formattedValue', '')).strip() == query_clean:
                         fecha_programada_ruta = header_temporal
                         zona_encontrada = str(c_ruta[12].get('formattedValue', '')).upper()
                         nombre_cliente = str(c_ruta[9].get('formattedValue', '')).upper()
                         break
 
-                # Si no se halló en RUTAS, buscamos la zona en ASIGNADOS
                 if zona_encontrada == "N/A":
                     for r_asig in rows_asig:
                         c_asig = r_asig.get('values', [])
@@ -248,30 +269,26 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                             zona_encontrada = str(c_asig[1].get('formattedValue', '')).upper()
                             break
 
-                # Definimos el status final según si tiene fecha de ruta o no
                 if fecha_programada_ruta:
                     status_final = f"📍 ADECUACIÓN EN RUTA PARA: {fecha_programada_ruta}"
-                    color_alerta = "#00ffff" # Cyan para diferenciar que ya va en camino
+                    color_alerta = "#00ffff" 
                 else:
                     status_final = f"⚠️ CLIENTE EN ESPERA DESDE {fecha_adecu}"
-                    color_alerta = "#ff4b4b" # Rojo original
+                    color_alerta = "#ff4b4b" 
 
                 return {
+                    "tipo": "ADECUACION",
                     "status": status_final,
                     "cliente": nombre_cliente,
                     "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
                     "zona": zona_encontrada,
                     "motivo": motivo,
                     "trabajo": trabajo,
-                    "color": color_alerta,
-                    "tipo": "ADECUACION"
+                    "color": color_alerta
                 }
     except: pass
 
-    # Si encontramos instalado pero no estaba en la lista de adecuaciones, retornamos el instalado normal
-    if res_final: return res_final
-
-    # --- 3. BUSCAR EN RUTAS PRE PLANIFICADAS (Si no es nada de lo anterior) ---
+    # --- 3. BUSCAR EN RUTAS NORMALES ---
     current_date_header = "FECHA NO DEFINIDA"
     for r in rows_ruta:
         cells = r.get('values', [])
@@ -282,11 +299,11 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
             continue
         if str(cells[7].get('formattedValue', '')).strip() == query_clean:
             return {
+                "tipo": "EN_RUTA",
                 "status": f"📍 EN RUTA PARA: {current_date_header}",
                 "cliente": str(cells[9].get('formattedValue', '')).upper(),
                 "zona": str(cells[12].get('formattedValue', '')).upper() if len(cells) > 12 else "N/A",
-                "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
-                "tipo": "EN_RUTA"
+                "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE"
             }
     return None
 
