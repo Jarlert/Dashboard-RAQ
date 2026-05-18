@@ -194,7 +194,7 @@ def process_data(rows_asig, rows_ruta, df_main):
 def hybrid_search(query, df_installed, asig_map, rows_ruta):
     query_clean = query.strip()
     
-    # --- PASO 1: BUSCAR EN INSTALADOS (Base de Datos Principal) ---
+    # --- PASO 1: BUSCAR EN INSTALADOS ---
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     if not match.empty:
         res = match.iloc[0]
@@ -213,27 +213,34 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta):
             "tipo": "INSTALADO"
         }
 
-    # --- PASO 2: BUSCAR EN RUTAS PRE PLANIFICADAS (Si no se encontró arriba) ---
+    # --- PASO 2: BUSCAR EN RUTAS PRE PLANIFICADAS ---
     current_date_header = "FECHA NO DEFINIDA"
     for r in rows_ruta:
         cells = r.get('values', [])
         if len(cells) < 10: continue
         
-        # Detectar la fila de fecha (Cabecera de ruta)
-        # Usamos la lógica de tu código original: columna J (índice 9) tiene la fecha/día
+        # Detectar cabecera de fecha
         val_j = str(cells[9].get('formattedValue', '')).lower()
         if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
             current_date_header = val_j.upper()
             continue
             
-        # Buscar el contrato en la columna H (índice 7)
+        # Buscar contrato en Columna H (7)
         val_h = str(cells[7].get('formattedValue', '')).strip()
         if val_h == query_clean:
-            # Si lo encuentra, extrae el nombre del cliente que está en la columna J
             nombre_cliente = str(cells[9].get('formattedValue', '')).upper()
+            # Extraer Zona de la Columna M (12)
+            zona = str(cells[12].get('formattedValue', '')).upper() if len(cells) > 12 else "N/A"
+            
+            # Buscar fecha de asignación en el mapa global
+            fecha_asig_dt = asig_map.get(query_clean)
+            fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "PENDIENTE"
+
             return {
                 "status": f"📍 EN RUTA PARA: {current_date_header}",
                 "cliente": nombre_cliente,
+                "zona": zona,
+                "fecha_asig": fecha_asig_str,
                 "tipo": "EN_RUTA"
             }
             
@@ -265,11 +272,13 @@ try:
                         </div>
                     """, unsafe_allow_html=True)
                 else:
-                    # Diseño para contrato EN RUTA
+                    # Tarjeta EN RUTA con FECHA ASIG y ZONA
                     st.markdown(f"""
                         <div class='search-result-card' style='border-color: #ff9900;'>
                             <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
                             <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
+                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                            <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
                             <p style='font-size:11px; color:#8899a6; margin-top:5px;'>Este contrato aún no ha sido reportado como instalado.</p>
                         </div>
                     """, unsafe_allow_html=True)
