@@ -279,7 +279,7 @@ try:
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
             # Pasamos rows_ruta que ya obtuviste en fetch_all_data()
-            res = hybrid_search(search_query, df, asig_map, rows_ruta)
+            res = hybrid_search(search_query, df, asig_map, rows_ruta, rows_asig)
         
             if res:
                 if res["tipo"] == "INSTALADO":
