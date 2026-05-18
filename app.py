@@ -252,7 +252,6 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                     if len(c_ruta) < 10: continue
                     val_j = str(c_ruta[9].get('formattedValue', '')).upper()
                     
-                    # DETECCIÓN DE CABECERAS (Fecha o Pendientes)
                     if "/" in val_j and any(d in val_j for d in ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]):
                         header_temporal = val_j
                         continue
@@ -285,6 +284,7 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                     "status": status_final,
                     "cliente": nombre_cliente,
                     "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
+                    "fecha_espera": fecha_adecu, # NUEVO CAMPO
                     "zona": zona_encontrada,
                     "motivo": motivo,
                     "trabajo": trabajo,
@@ -315,7 +315,7 @@ def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
                 "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE"
             }
     return None
-
+    
 try:
     rows_asig, rows_ruta, df_raw_main = fetch_all_data()
     df, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer = process_data(rows_asig, rows_ruta, df_raw_main)
@@ -350,6 +350,7 @@ try:
 <p style='color:{res['color']}; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
 <p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
 <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>EN ESPERA DESDE:</b> {res['fecha_espera']}</p>
 <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
 <p style='font-size:12px; margin:0; color:white;'><b>MOTIVO:</b> {res['motivo']}</p>
 <p style='font-size:12px; margin:0; color:white;'><b>TRABAJO:</b> {res['trabajo']}</p>
