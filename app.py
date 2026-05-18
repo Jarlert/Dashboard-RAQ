@@ -52,11 +52,6 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     .stApp { background-color: #0e1117; color: #ffffff; font-family: 'Poppins', sans-serif; }
     .section-title { color: #ffffff !important; font-size: 18px; font-weight: 600; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #00d4ff; padding-left: 12px; }
-    
-    /* Alineación de logos para acercarlos al centro */
-    [data-testid="column"]:nth-child(1) [data-testid="stVerticalBlock"] { align-items: flex-end; }
-    [data-testid="column"]:nth-child(3) [data-testid="stVerticalBlock"] { align-items: flex-start; }
-
     .metric-container { 
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); 
         padding: 15px; border-radius: 10px; text-align: center; height: 110px;
@@ -66,10 +61,13 @@ st.markdown("""
     .m-label { color: #8899a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
     .m-value { color: #ffffff; font-size: 22px; font-weight: 700; line-height: 1; }
     .m-sub { color: #00d4ff; font-size: 9px; margin-top: 5px; font-weight: 400; }
-    
-    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; max-height: 400px; overflow-y: auto; }
-    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: normal; line-height: 1.3; border: 1px solid rgba(0,0,0,0.1); }
-    
+    @media (max-width: 768px) {
+        .metric-container { height: 95px !important; }
+        .m-value { font-size: 16px !important; }
+    }
+    .ruta-box { background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 10px; height: 380px; overflow-y: auto; }
+    .ruta-header { font-size: 11px; font-weight: 600; border-bottom: 1px solid #444; margin-bottom: 8px; display: flex; justify-content: space-between; padding-bottom: 3px;}
+    .cliente-item { font-size: 9px; padding: 6px 10px; margin-bottom: 3px; border-radius: 4px; color: #000 !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(0,0,0,0.1); }
     .bg-white { background-color: #ffffff; color: #000 !important; }
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
@@ -91,15 +89,12 @@ def fetch_all_data():
     service = build('sheets', 'v4', credentials=creds)
     asig_id = "1KK1Ng6lF-dGSzOt46kVsqAnY0MG4v-Ggp4S8x1IZokQ"
     
-    # Carga 1: ASIGNADOS (Mapa y KPIs)
     asig_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["ASIGNADOS!A:G"], includeGridData=True).execute()
     rows_asig = asig_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # Carga 2: RUTAS PRE PLANIFICADAS
     ruta_sheet = service.spreadsheets().get(spreadsheetId=asig_id, ranges=["RUTAS PRE PLANIFICADAS!A:N"], includeGridData=True).execute()
     rows_ruta = ruta_sheet['sheets'][0]['data'][0].get('rowData', [])
     
-    # Carga 3: Base Principal
     df_main = conn.read(worksheet="Base de Datos ", ttl=0)
     df_main = df_main.dropna(subset=["Marca temporal"], how='all').copy()
     return rows_asig, rows_ruta, df_main
@@ -116,9 +111,8 @@ def process_data(rows_asig, rows_ruta, df_main):
         val_g = str(cells[6].get('formattedValue', '')).lower()
         bg = cells[6].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg.get('red', 0)-1.0) < 0.1 and abs(bg.get('green', 0)-0.6) < 0.1
-        
         if is_orange or "asignación raq" in val_g:
-            parts = val_g.replace('asignación raq','').strip().split(' ')
+            parts = val_g.split(' ')
             for p in parts:
                 if '/' in p:
                     try: current_date_asig = pd.to_datetime(p, dayfirst=True).date()
@@ -127,13 +121,11 @@ def process_data(rows_asig, rows_ruta, df_main):
             elif any(v in val_g for v in v_ayer): f_a, f_h = True, False
             else: f_h = f_a = False
             continue
-        
         contrato = str(cells[4].get('formattedValue', '')).replace('.0', '').strip()
         if contrato and current_date_asig:
             asig_map[contrato] = current_date_asig
             if f_h: asig_hoy += 1
             if f_a: asig_ayer += 1
-
         if 'userEnteredValue' in cells[1]:
             bg_gen = cells[1].get('effectiveFormat', {}).get('backgroundColor', {})
             r, g, b = (bg_gen.get('red', 0.0), bg_gen.get('green', 0.0), bg_gen.get('blue', 0.0)) if bg_gen else (1.0, 1.0, 1.0)
@@ -155,12 +147,8 @@ def process_data(rows_asig, rows_ruta, df_main):
     df_main['Fecha_DT'] = pd.to_datetime(df_main['Fecha_Limpia'], errors='coerce')
     df_main['Contrato_Str'] = df_main['Contrato'].astype(str).str.replace('.0', '', regex=False).str.strip()
     df_main['Fecha_Asignacion'] = df_main['Contrato_Str'].map(asig_map)
-    
-    f_inst = pd.to_datetime(df_main['Fecha_Limpia'], errors='coerce')
-    f_asig = pd.to_datetime(df_main['Fecha_Asignacion'], errors='coerce')
-    df_main['Dias_Realizacion'] = (f_inst - f_asig).dt.days
+    df_main['Dias_Realizacion'] = (pd.to_datetime(df_main['Fecha_Limpia']) - pd.to_datetime(df_main['Fecha_Asignacion'])).dt.days
     df_main.loc[df_main['Dias_Realizacion'] < 0, 'Dias_Realizacion'] = 0
-    
     df_main['Metraje'] = pd.to_numeric(df_main['Metros '], errors='coerce').fillna(0)
     df_main['Tensores'] = pd.to_numeric(df_main['Tensores'], errors='coerce').fillna(0)
     col_onu = [c for c in df_main.columns if 'Serial ONU' in c or 'Serial' in c]
@@ -210,8 +198,10 @@ def hybrid_search(query, df_installed, asig_map):
     except: pass
     if not match.empty:
         res = match.iloc[0]
+        f_inst = res['Fecha_Limpia'].strftime('%d/%m/%y') if pd.notnull(res['Fecha_Limpia']) else "N/A"
+        # CORRECCIÓN: Convertir a int para quitar el .0
         tardo_val = int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": f_inst, "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
     return None
 
 try:
@@ -225,30 +215,13 @@ try:
             res = hybrid_search(search_query, df, asig_map)
             if res:
                 adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
+                # CORRECCIÓN: Texto de días sin el .0
+                tardo_text = f"{res['tardo']}" if res.get('tardo') != "N/A" else "N/A"
+                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {tardo_text} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
             else: st.warning("Contrato no encontrado.")
 
-    # --- HEADER CON LOGOS ACERCADOS ---
-    col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([0.6, 1, 3.5, 1.5])
-
-    with col_espacio:
-        st.write("") 
-
-    with col_logo_izq:
-        try: 
-            st.image("logo_izq.png", width=150) 
-        except: 
-            st.write("")
-        
-    with col_titulo:
-        st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: center; color: #00d4ff; margin-top: 0;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
-
-    with col_logo_der:
-        try: 
-            st.image("logo_der.png", width=150)
-        except: 
-            st.write("")
+    st.markdown(f"<h1 style='text-align: center; color: white;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     
     st.markdown("<div class='section-title'>Rendimiento Operativo</div>", unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
@@ -307,28 +280,16 @@ try:
     with a2: st.markdown(f"<div class='metric-container'><div class='m-label'>ADECUACIÓN O CAJA</div><div class='m-value'>{p_adecuacion}</div></div>", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Control de Ruta y Materiales</div>", unsafe_allow_html=True)
-    c_r1, c_r2 = st.columns(2)
+    c_hoy, c_ayer, c_mat, c_leg = st.columns([1, 1, 1, 0.6])
     def render_c(c): return f"<div class='cliente-item bg-{c['color']}'>{str(int(float(c['contrato'])))} | {c['nombre']} | {c['zona']} | ({c['tipo']})</div>"
-    with c_r1:
-        with st.expander(f"📍 RUTA HOY ({len(ruta_hoy)})", expanded=False):
-            st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
-    with c_r2:
-        with st.expander(f"📍 RUTA AYER LAB. ({len(ruta_ayer)})", expanded=False):
-            st.markdown(f"<div class='ruta-box'>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
-    
-    c_m1, c_m2 = st.columns(2)
-    with c_m1:
-        df_hoy_mat = df[df['Fecha_Limpia'] == hoy_vzla]
-        with st.expander(f"📍 MATERIALES HOY ({len(df_hoy_mat)})", expanded=False):
-            items_mat_hoy = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_hoy_mat.iterrows()])
-            st.markdown(f"<div class='ruta-box'>{items_mat_hoy}</div>", unsafe_allow_html=True)
-    with c_m2:
+    with c_hoy: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA HOY</span><span>TOTAL: {len(ruta_hoy)}</span></div>{''.join([render_c(c) for c in ruta_hoy])}</div>", unsafe_allow_html=True)
+    with c_ayer: st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>RUTA AYER LABORAL</span><span>TOTAL: {len(ruta_ayer)}</span></div>{''.join([render_c(c) for c in ruta_ayer])}</div>", unsafe_allow_html=True)
+    with c_mat:
         df_ayer_mat = df[df['Fecha_Limpia'] == ayer_laboral_vzla]
-        with st.expander(f"📍 MATERIALES AYER ({len(df_ayer_mat)})", expanded=False):
-            items_mat_ayer = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
-            st.markdown(f"<div class='ruta-box'>{items_mat_ayer}</div>", unsafe_allow_html=True)
-
-    st.markdown("""<div class='legend-container'><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div></div>""", unsafe_allow_html=True)
+        items_mat = "".join([f"<div class='cliente-item bg-green'>{str(int(float(r['Contrato_Str'])))} | {r['Nombre del cliente']} | 📏{int(r['Metraje'])}m | ⚙️{int(r['Tensores'])} | 🆔{str(r['ONU_Final'])[-6:]}</div>" for _, r in df_ayer_mat.iterrows()])
+        st.markdown(f"<div class='ruta-box'><div class='ruta-header'><span>MATERIALES AYER</span><span>TOTAL: {len(df_ayer_mat)}</span></div>{items_mat}</div>", unsafe_allow_html=True)
+    with c_leg:
+        st.markdown("""<div class='ruta-box' style='height:380px;'><div class='ruta-header'>LEYENDA</div><div class='legend-item'><div class='legend-color' style='background:#00ff00;'></div><span>Finalizado</span></div><div class='legend-item'><div class='legend-color' style='background:#b7b7b7;'></div><span>Adecuación / Caja</span></div><div class='legend-item'><div class='legend-color' style='background:#00ffff;'></div><span>Devuelto / Inconv.</span></div><div class='legend-item'><div class='legend-color' style='background:#ffffff;'></div><span>Pendiente</span></div><hr style='margin:10px 0; opacity:0.2;'><div style='font-size:10px; color:#8899a6;'>Ayer Laboral: Muestra el último día de trabajo (Viernes si hoy es Lunes).</div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
     col_h1, col_h2 = st.columns([1, 2])
