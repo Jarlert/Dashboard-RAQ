@@ -320,7 +320,7 @@ try:
     rows_asig, rows_ruta, df_raw_main = fetch_all_data()
     df, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer = process_data(rows_asig, rows_ruta, df_raw_main)
     
-    with st.sidebar:
+with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
@@ -328,50 +328,46 @@ try:
         
             if res:
                 if res["tipo"] == "INSTALADO":
-                    disclaimer_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-bottom:10px;'>{res['disclaimer']}</p>" if res.get('disclaimer') else ""
+                    # Manejo limpio del disclaimer
+                    disc = res.get('disclaimer') if res.get('disclaimer') else ""
+                    disc_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-bottom:10px;'>{disc}</p>" if disc else ""
                     
-                    html_content = f"""
-                    <div style="background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px;">
-                        <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                        {disclaimer_html}
-                        <p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
-                        <p style='color:#00ff00; font-size:11px; margin-top:5px; font-weight:bold;'>EL CLIENTE TARDÓ {res['tardo']} DÍAS</p>
-                        <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
-                        <p style='font-size:12px; margin:0; color:white;'><b>METRAJE:</b> {res['metros']} mts</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>TENSORES:</b> {res['tensores']} und</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>ONU:</b> {res['onu']}</p>
-                    </div>
-                    """
-                    st.markdown(html_content, unsafe_allow_html=True)
+                    # El HTML debe empezar pegado al borde izquierdo de la línea en el código
+                    card_instalado = f"""<div style="background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px;">
+<p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+{disc_html}
+<p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
+<p style='color:#00ff00; font-size:11px; margin-top:5px; font-weight:bold;'>EL CLIENTE TARDÓ {res['tardo']} DÍAS</p>
+<hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
+<p style='font-size:12px; margin:0; color:white;'><b>METRAJE:</b> {res['metros']} mts</p>
+<p style='font-size:12px; margin:0; color:white;'><b>TENSORES:</b> {res['tensores']} und</p>
+<p style='font-size:12px; margin:0; color:white;'><b>ONU:</b> {res['onu']}</p>
+</div>"""
+                    st.markdown(card_instalado, unsafe_allow_html=True)
                 
                 elif res["tipo"] == "ADECUACION":
-                    html_adecu = f"""
-                    <div style="background: rgba(255, 255, 255, 0.05); border: 1px solid {res['color']}; padding: 15px; border-radius: 10px; margin-top: 10px;">
-                        <p style='color:{res['color']}; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                        <hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
-                        <p style='font-size:12px; margin:0; color:white;'><b>MOTIVO:</b> {res['motivo']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>TRABAJO:</b> {res['trabajo']}</p>
-                    </div>
-                    """
-                    st.markdown(html_adecu, unsafe_allow_html=True)
+                    card_adecu = f"""<div style="background: rgba(255, 255, 255, 0.05); border: 1px solid {res['color']}; padding: 15px; border-radius: 10px; margin-top: 10px;">
+<p style='color:{res['color']}; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+<hr style='margin: 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);'>
+<p style='font-size:12px; margin:0; color:white;'><b>MOTIVO:</b> {res['motivo']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>TRABAJO:</b> {res['trabajo']}</p>
+</div>"""
+                    st.markdown(card_adecu, unsafe_allow_html=True)
                 
                 else:
-                    html_ruta = f"""
-                    <div style="background: rgba(255, 153, 0, 0.1); border: 1px solid #ff9900; padding: 15px; border-radius: 10px; margin-top: 10px;">
-                        <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
-                        <p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
-                    </div>
-                    """
-                    st.markdown(html_ruta, unsafe_allow_html=True)
+                    card_ruta = f"""<div style="background: rgba(255, 153, 0, 0.1); border: 1px solid #ff9900; padding: 15px; border-radius: 10px; margin-top: 10px;">
+<p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>CLIENTE:</b> {res['cliente']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+<p style='font-size:12px; margin:0; color:white;'><b>ZONA:</b> {res['zona']}</p>
+</div>"""
+                    st.markdown(card_ruta, unsafe_allow_html=True)
             else:
                 st.warning("Contrato no encontrado.")
-
     # --- HEADER CON LOGOS ACERCADOS ---
     col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([0.6, 1, 3.5, 1.5])
 
