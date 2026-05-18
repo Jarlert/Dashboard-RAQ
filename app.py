@@ -191,27 +191,52 @@ def process_data(rows_asig, rows_ruta, df_main):
     ruta_ayer = extract_ruta(rows_ruta, ayer_laboral_dt)
     return df_main, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer
 
-def hybrid_search(query, df_installed, asig_map):
+def hybrid_search(query, df_installed, asig_map, rows_ruta):
     query_clean = query.strip()
+    
+    # --- PASO 1: BUSCAR EN INSTALADOS (Base de Datos Principal) ---
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
-    fecha_asig_dt = asig_map.get(query_clean)
-    fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
-    adecu_msg = None
-    try:
-        creds_info = st.secrets["connections"]["gsheets"]
-        creds = service_account.Credentials.from_service_account_info(creds_info)
-        service = build('sheets', 'v4', credentials=creds)
-        adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
-        res_ad = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:B").execute()
-        for r in res_ad.get('values', []):
-            if len(r) >= 1 and str(r[0]).strip() == query_clean:
-                adecu_msg = f"⚠️ EN ADECUACIÓN DESDE {r[1] if len(r)>1 else 'N/A'}"
-                break
-    except: pass
     if not match.empty:
         res = match.iloc[0]
+        fecha_asig_dt = asig_map.get(query_clean)
+        fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
         tardo_val = int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A"
-        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": fecha_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": tardo_val, "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'], "adecu_extra": adecu_msg}
+        return {
+            "status": "✅ 100% INSTALADO", 
+            "cliente": res['Nombre del cliente'], 
+            "fecha_asig": fecha_asig_str, 
+            "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), 
+            "tardo": tardo_val, 
+            "metros": int(res['Metraje']), 
+            "tensores": int(res['Tensores']), 
+            "onu": res['ONU_Final'],
+            "tipo": "INSTALADO"
+        }
+
+    # --- PASO 2: BUSCAR EN RUTAS PRE PLANIFICADAS (Si no se encontró arriba) ---
+    current_date_header = "FECHA NO DEFINIDA"
+    for r in rows_ruta:
+        cells = r.get('values', [])
+        if len(cells) < 10: continue
+        
+        # Detectar la fila de fecha (Cabecera de ruta)
+        # Usamos la lógica de tu código original: columna J (índice 9) tiene la fecha/día
+        val_j = str(cells[9].get('formattedValue', '')).lower()
+        if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
+            current_date_header = val_j.upper()
+            continue
+            
+        # Buscar el contrato en la columna H (índice 7)
+        val_h = str(cells[7].get('formattedValue', '')).strip()
+        if val_h == query_clean:
+            # Si lo encuentra, extrae el nombre del cliente que está en la columna J
+            nombre_cliente = str(cells[9].get('formattedValue', '')).upper()
+            return {
+                "status": f"📍 EN RUTA PARA: {current_date_header}",
+                "cliente": nombre_cliente,
+                "tipo": "EN_RUTA"
+            }
+            
     return None
 
 try:
@@ -222,11 +247,34 @@ try:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
-            res = hybrid_search(search_query, df, asig_map)
+            # Pasamos rows_ruta que ya obtuviste en fetch_all_data()
+            res = hybrid_search(search_query, df, asig_map, rows_ruta)
+        
             if res:
-                adecu_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-top:5px;'>{res['adecu_extra']}</p>" if res.get('adecu_extra') else ""
-                st.markdown(f"<div class='search-result-card'><p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>{adecu_html}<p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p><p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p><p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p><p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS EN REALIZARSE</b></p><p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p><p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p><p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p></div>", unsafe_allow_html=True)
-            else: st.warning("Contrato no encontrado.")
+                if res["tipo"] == "INSTALADO":
+                    st.markdown(f"""
+                        <div class='search-result-card'>
+                            <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                            <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
+                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                            <p style='font-size:12px; margin:0;'><b>FECHA INST:</b> {res['fecha_inst']}</p>
+                            <p style='color:#00ff00; font-size:11px; margin-top:5px;'><b>EL CLIENTE TARDÓ {res['tardo']} DÍAS</b></p>
+                            <p style='font-size:12px; margin:0;'><b>METRAJE:</b> {res['metros']} mts</p>
+                            <p style='font-size:12px; margin:0;'><b>TENSORES:</b> {res['tensores']} und</p>
+                            <p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    # Diseño para contrato EN RUTA
+                    st.markdown(f"""
+                        <div class='search-result-card' style='border-color: #ff9900;'>
+                            <p style='color:#ff9900; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
+                            <p style='font-size:12px; margin:0;'><b>CLIENTE:</b> {res['cliente']}</p>
+                            <p style='font-size:11px; color:#8899a6; margin-top:5px;'>Este contrato aún no ha sido reportado como instalado.</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.warning("Contrato no encontrado en Base de Datos ni en Rutas.")
 
     # --- HEADER CON LOGOS ACERCADOS ---
     col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([0.6, 1, 3.5, 1.5])
