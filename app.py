@@ -320,7 +320,7 @@ try:
     rows_asig, rows_ruta, df_raw_main = fetch_all_data()
     df, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer = process_data(rows_asig, rows_ruta, df_raw_main)
     
-with st.sidebar:
+    with st.sidebar:
         st.markdown("### 🔍 Buscador de Contratos")
         search_query = st.text_input("Ingresa el número de contrato:")
         if search_query:
@@ -328,11 +328,9 @@ with st.sidebar:
         
             if res:
                 if res["tipo"] == "INSTALADO":
-                    # Manejo limpio del disclaimer
                     disc = res.get('disclaimer') if res.get('disclaimer') else ""
                     disc_html = f"<p style='color:#ff9900; font-size:11px; font-weight:bold; margin-bottom:10px;'>{disc}</p>" if disc else ""
                     
-                    # El HTML debe empezar pegado al borde izquierdo de la línea en el código
                     card_instalado = f"""<div style="background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px;">
 <p style='color:#00d4ff; font-weight:600; margin-bottom:5px;'>{res['status']}</p>
 {disc_html}
@@ -368,6 +366,7 @@ with st.sidebar:
                     st.markdown(card_ruta, unsafe_allow_html=True)
             else:
                 st.warning("Contrato no encontrado.")
+
     # --- HEADER CON LOGOS ACERCADOS ---
     col_espacio, col_logo_izq, col_titulo, col_logo_der = st.columns([0.6, 1, 3.5, 1.5])
 
