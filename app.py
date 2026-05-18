@@ -78,9 +78,7 @@ st.markdown("""
     .bg-green { background-color: #00ff00; color: #000 !important; }
     .bg-grey { background-color: #b7b7b7; color: #000 !important; }
     .bg-cyan { background-color: #00ffff; color: #000 !important; }
-    .month-row { display: flex; justify-content: space-between; padding: 8px; background: rgba(255, 255, 255, 0.03); margin-bottom: 3px; border-radius: 6px; font-size: 13px; }
     .search-result-card { background: rgba(0, 212, 255, 0.1); border: 1px solid #00d4ff; padding: 15px; border-radius: 10px; margin-top: 10px; }
-    [data-testid="stExpander"] { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -104,52 +102,33 @@ def fetch_all_data():
 # 4. BUSCADOR MULTI-LIBRO
 def hybrid_search(query, df_inst, asig_map, rows_ruta):
     q_clean = str(query).strip()
-    
-    # NIVEL 1: Buscar en Instalados
     match = df_inst[df_inst['Contrato_Str'] == q_clean]
     f_asig_dt = asig_map.get(q_clean)
     f_asig_str = f_asig_dt.strftime('%d/%m/%y') if pd.notnull(f_asig_dt) else "N/A"
     
     if not match.empty:
         res = match.iloc[0]
-        return {
-            "status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], 
-            "fecha_asig": f_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), 
-            "tardo": int(res['Dias_Realizacion']), "metros": int(res['Metraje']), 
-            "tensores": int(res['Tensores']), "onu": res['ONU_Final']
-        }
+        return {"status": "✅ 100% INSTALADO", "cliente": res['Nombre del cliente'], "fecha_asig": f_asig_str, "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), "tardo": int(res['Dias_Realizacion']), "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final']}
     
-    # NIVEL 2: Buscar en Rutas
     curr_date_ruta = "FECHA NO DEFINIDA"
     for row in rows_ruta:
         cells = row.get('values', [])
         if len(cells) < 10: continue
-        
-        # Detectar fila naranja de fecha (Columna J)
         val_j = str(cells[9].get('formattedValue', '')).lower()
         bg_j = cells[9].get('effectiveFormat', {}).get('backgroundColor', {})
         is_orange = abs(bg_j.get('red', 0)-1.0) < 0.1 and abs(bg_j.get('green', 0)-0.6) < 0.1
-        
         if is_orange or ("/" in val_j and any(d in val_j for d in ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"])):
             curr_date_ruta = val_j.upper()
             continue
-            
-        # Match de contrato (Columna H)
         cont_h = str(cells[7].get('formattedValue', '')).replace('.0', '').strip()
         if cont_h == q_clean:
-            return {
-                "status": f"🚚 EN RUTA PARA {curr_date_ruta}",
-                "cliente": cells[9].get('formattedValue', '').upper(),
-                "zona": cells[12].get('formattedValue', '').upper() if len(cells) > 12 else "N/A",
-                "fecha_asig": f_asig_str
-            }
+            return {"status": f"🚚 EN RUTA PARA {curr_date_ruta}", "cliente": cells[9].get('formattedValue', '').upper(), "zona": cells[12].get('formattedValue', '').upper() if len(cells) > 12 else "N/A", "fecha_asig": f_asig_str}
     return None
 
 # 5. EJECUCIÓN
 try:
     rows_asig, rows_ruta, df_raw = fetch_all_data()
     
-    # Procesar Mapas y KPIs
     asig_map = {}
     p_real, p_adec, asig_h, asig_a = 0, 0, 0, 0
     v_hoy, v_ayer = get_fecha_variantes(ahora_vzla), get_fecha_variantes(ayer_laboral_dt)
@@ -184,7 +163,6 @@ try:
     df['Metraje'] = pd.to_numeric(df['Metros '], errors='coerce').fillna(0)
     df['Tensores'] = pd.to_numeric(df['Tensores'], errors='coerce').fillna(0)
     df['ONU_Final'] = df['Serial ONU'].astype(str) if 'Serial ONU' in df.columns else "N/A"
-    df['Fecha_DT'] = pd.to_datetime(df['Fecha_Limpia'], errors='coerce')
 
     with st.sidebar:
         st.markdown("### 🔍 Buscador Maestro")
@@ -204,7 +182,7 @@ try:
     with cl: st.image("logo_izq.png", width=150)
     with ct:
         st.markdown("<h1 style='text-align: center; color: white; margin:0;'>💎 FIBRA RAQ INTELLIGENCE</h1>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: center; color: #00d4ff;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color: #00d4ff; font-weight:600;'>{ahora_vzla.strftime('%d/%m/%Y %I:%M %p')}</p>", unsafe_allow_html=True)
     with cr: st.image("logo_der.png", width=150)
     
     # KPIs
@@ -222,12 +200,13 @@ try:
     k5, k6, k7, k8 = st.columns(4)
     with k5: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Hoy</div><div class='m-value'>{asig_h}</div></div>", unsafe_allow_html=True)
     with k6: st.markdown(f"<div class='metric-container'><div class='m-label'>Asig. Ayer Lab.</div><div class='m-value'>{asig_a}</div></div>", unsafe_allow_html=True)
-    with k7:
-        avg_s = df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s:.1f if pd.notnull(avg_s) else 0}</div></div>", unsafe_allow_html=True)
-    with k8:
-        avg_p = df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean()
-        st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p:.1f if pd.notnull(avg_p) else 0}</div></div>", unsafe_allow_html=True)
+    
+    # FIX: Cálculo de medias fuera del f-string
+    avg_s_val = f"{df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)]['Dias_Realizacion'].mean():.1f}" if not df[(df['Fecha_Limpia'] >= i_s) & (df['Fecha_Limpia'] <= f_s)].empty else "0"
+    avg_p_val = f"{df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)]['Dias_Realizacion'].mean():.1f}" if not df[(df['Fecha_Limpia'] >= i_p) & (df['Fecha_Limpia'] <= f_p)].empty else "0"
+
+    with k7: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Actual</div><div class='m-value'>{avg_s_val}</div></div>", unsafe_allow_html=True)
+    with k8: st.markdown(f"<div class='metric-container'><div class='m-label'>Media Sem. Pasada</div><div class='m-value'>{avg_p_val}</div></div>", unsafe_allow_html=True)
 
     # RUTAS
     def get_ruta_list(fecha_dt):
@@ -261,7 +240,8 @@ try:
 
     # HISTÓRICO
     st.markdown("<div class='section-title'>Análisis Histórico</div>", unsafe_allow_html=True)
-    df_hist = df.dropna(subset=['Fecha_DT']).copy()
+    df_hist = df.dropna(subset=['Fecha_Limpia']).copy()
+    df_hist['Fecha_DT'] = pd.to_datetime(df_hist['Fecha_Limpia'], errors='coerce')
     df_hist['Mes_Nom'] = df_hist['Fecha_DT'].dt.month.map({1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'})
     df_hist['Año_H'] = df_hist['Fecha_DT'].dt.year
     df_hist['Mes_H'] = df_hist['Fecha_DT'].dt.month
