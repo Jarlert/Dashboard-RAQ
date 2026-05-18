@@ -191,56 +191,80 @@ def process_data(rows_asig, rows_ruta, df_main):
     ruta_ayer = extract_ruta(rows_ruta, ayer_laboral_dt)
     return df_main, asig_map, p_realizar, p_adecuacion, asig_hoy, asig_ayer, ruta_hoy, ruta_ayer
 
-def hybrid_search(query, df_installed, asig_map, rows_ruta):
+def hybrid_search(query, df_installed, asig_map, rows_ruta, rows_asig):
     query_clean = query.strip()
     
-    # --- PASO 1: BUSCAR EN INSTALADOS ---
+    # --- 1. BUSCAR EN INSTALADOS ---
     match = df_installed[df_installed['Contrato_Str'] == query_clean]
     if not match.empty:
         res = match.iloc[0]
         fecha_asig_dt = asig_map.get(query_clean)
         fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "N/A"
-        tardo_val = int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A"
         return {
             "status": "✅ 100% INSTALADO", 
             "cliente": res['Nombre del cliente'], 
             "fecha_asig": fecha_asig_str, 
             "fecha_inst": res['Fecha_Limpia'].strftime('%d/%m/%y'), 
-            "tardo": tardo_val, 
-            "metros": int(res['Metraje']), 
-            "tensores": int(res['Tensores']), 
-            "onu": res['ONU_Final'],
+            "tardo": int(res['Dias_Realizacion']) if pd.notnull(res['Dias_Realizacion']) else "N/A",
+            "metros": int(res['Metraje']), "tensores": int(res['Tensores']), "onu": res['ONU_Final'],
             "tipo": "INSTALADO"
         }
 
-    # --- PASO 2: BUSCAR EN RUTAS PRE PLANIFICADAS ---
+    # --- 2. BUSCAR EN LIBRO DE ADECUACIONES (ID: 1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY) ---
+    try:
+        creds_info = st.secrets["connections"]["gsheets"]
+        creds = service_account.Credentials.from_service_account_info(creds_info)
+        service = build('sheets', 'v4', credentials=creds)
+        adecu_id = "1Y4AkWf4kSRrJcny9SUtW0qY5jzrcizpU3xjdBdjbmqY"
+        # Consultamos Columnas A (Contrato), B (Fecha), C (Motivo), D (Trabajo)
+        res_ad = service.spreadsheets().values().get(spreadsheetId=adecu_id, range="A:D").execute()
+        adecu_rows = res_ad.get('values', [])
+        
+        for row in adecu_rows:
+            if len(row) >= 1 and str(row[0]).strip() == query_clean:
+                # Si lo encuentra en adecuación, necesitamos buscar su ZONA en Rutas o Asignados
+                zona_encontrada = "N/A"
+                nombre_cliente = "DESCONOCIDO"
+                
+                # Buscar zona y nombre en rows_ruta (Columna H=Contrato, J=Nombre, M=Zona)
+                for r_ruta in rows_ruta:
+                    c_ruta = r_ruta.get('values', [])
+                    if len(c_ruta) > 12 and str(c_ruta[7].get('formattedValue', '')).strip() == query_clean:
+                        zona_encontrada = str(c_ruta[12].get('formattedValue', '')).upper()
+                        nombre_cliente = str(c_ruta[9].get('formattedValue', '')).upper()
+                        break
+
+                fecha_asig_dt = asig_map.get(query_clean)
+                fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "PENDIENTE"
+
+                return {
+                    "status": f"⚠️ PENDIENTE POR ADECUACION DESDE {row[1] if len(row)>1 else 'N/A'}",
+                    "cliente": nombre_cliente,
+                    "fecha_asig": fecha_asig_str,
+                    "zona": zona_encontrada,
+                    "motivo": row[2] if len(row)>2 else "No especificado",
+                    "trabajo": row[3] if len(row)>3 else "No especificado",
+                    "tipo": "ADECUACION"
+                }
+    except Exception as e:
+        pass
+
+    # --- 3. BUSCAR EN RUTAS PRE PLANIFICADAS (Si no estaba en los anteriores) ---
     current_date_header = "FECHA NO DEFINIDA"
     for r in rows_ruta:
         cells = r.get('values', [])
         if len(cells) < 10: continue
-        
-        # Detectar cabecera de fecha
         val_j = str(cells[9].get('formattedValue', '')).lower()
         if "/" in val_j and any(d in val_j for d in ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]):
             current_date_header = val_j.upper()
             continue
-            
-        # Buscar contrato en Columna H (7)
         val_h = str(cells[7].get('formattedValue', '')).strip()
         if val_h == query_clean:
-            nombre_cliente = str(cells[9].get('formattedValue', '')).upper()
-            # Extraer Zona de la Columna M (12)
-            zona = str(cells[12].get('formattedValue', '')).upper() if len(cells) > 12 else "N/A"
-            
-            # Buscar fecha de asignación en el mapa global
-            fecha_asig_dt = asig_map.get(query_clean)
-            fecha_asig_str = fecha_asig_dt.strftime('%d/%m/%y') if pd.notnull(fecha_asig_dt) else "PENDIENTE"
-
             return {
                 "status": f"📍 EN RUTA PARA: {current_date_header}",
-                "cliente": nombre_cliente,
-                "zona": zona,
-                "fecha_asig": fecha_asig_str,
+                "cliente": str(cells[9].get('formattedValue', '')).upper(),
+                "zona": str(cells[12].get('formattedValue', '')).upper() if len(cells) > 12 else "N/A",
+                "fecha_asig": asig_map.get(query_clean).strftime('%d/%m/%y') if pd.notnull(asig_map.get(query_clean)) else "PENDIENTE",
                 "tipo": "EN_RUTA"
             }
             
@@ -271,6 +295,18 @@ try:
                             <p style='font-size:12px; margin:0;'><b>ONU:</b> {res['onu']}</p>
                         </div>
                     """, unsafe_allow_html=True)
+                elif res["tipo"] == "ADECUACION":
+                    # DISEÑO PARA ADECUACIÓN
+                    st.markdown(f"""
+                        <div class='search-result-card' style='border-color: #ff4b4b; background: rgba(255, 75, 75, 0.1);'>
+                            <p style='color:#ff4b4b; font-weight:600; font-size:13px; margin-bottom:8px;'>{res['status']}</p>
+                            <p style='font-size:12px; margin:0;'><b>ZONA:</b> {res['zona']}</p>
+                            <p style='font-size:12px; margin:0;'><b>FECHA ASIG:</b> {res['fecha_asig']}</p>
+                            <p style='font-size:12px; margin:5px 0 0 0;'><b>MOTIVO:</b> {res['motivo']}</p>
+                            <p style='font-size:12px; margin:0;'><b>TRABAJO A REALIZAR:</b> {res['trabajo']}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+
                 else:
                     # Tarjeta EN RUTA con FECHA ASIG y ZONA
                     st.markdown(f"""
